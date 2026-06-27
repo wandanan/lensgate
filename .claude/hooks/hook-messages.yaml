@@ -1,0 +1,471 @@
+# Hook 提醒消息集中配置
+# 变量用 {var_name} 占位，运行时由 hook 脚本填充
+# 列表类型变量 (list) 由 render_message() 自动换行拼接
+# 条件分支由 hook 脚本在 variables 中预渲染
+
+validate-test-case:
+  missing_verification_section:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试用例缺少「验证方式要求」章节
+
+      文件: {file_path}
+
+      每个 test-cases/{{task-id}}.md 必须在标题后包含:
+
+        ## 验证方式要求
+        | 验证方式 | 要求等级 | 工具/命令 | 说明 |
+        |----------|---------|-----------|------|
+        | 编译检查 | ✅ 必需 | ... | ... |
+        | 浏览器交互测试 | ✅/⚠️/⬜ | ... | ... |
+        | 视觉验证 | ✅/⚠️/⬜ | ... | ... |
+
+      等级选择:
+        前端页面/复杂组件 → 浏览器交互: ✅ 必需, 视觉: ✅ 必需
+        基础 UI 组件 → 浏览器交互: ✅ 必需, 视觉: ⚠️ 推荐
+        纯配置/类型/Store → 浏览器交互: ⬜ 不需要, 视觉: ⬜ 不需要
+
+      模板参考: templates/test-case-template.md
+
+      操作: 补全验证方式要求章节后重新写入。
+
+  legacy_tc_id_format:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试用例 ID 格式不规范 — 缺少验证类型代号
+
+      文件: {file_path}
+
+      发现旧格式 TC ID (缺少 VTYPE 代号):
+      {legacy_ids}
+
+      测试用例 ID 必须遵循格式: TC-{{task}}-{{VTYPE}}-{{NNN}}
+
+      验证类型代号 (VTYPE):
+        BLD — 编译检查 (tsc + vite build)
+        E2E — 浏览器交互测试 (Playwright)
+        VIS — 视觉验证 (screenshot + visual_test.py)
+        API — API 运行时测试 (HTTP 请求/响应)
+        LOG — 逻辑/单元测试 (纯代码)
+
+      正确示例:
+        TC-B01-BLD-001  (编译检查)
+        TC-B01-E2E-001  (浏览器交互)
+        TC-B01-E2E-002  (浏览器交互)
+        TC-B01-VIS-001  (视觉验证)
+
+      每个测试用例根据其主要验证方式选择对应的 VTYPE 代号。
+      操作: 修正 TC ID 格式后重新写入。
+
+  vtype_requirement_mismatch:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: TC ID 中的验证类型与验证方式要求不一致
+
+      文件: {file_path}
+
+      以下 TC ID 使用了某验证类型，但验证方式要求中标注为不需要:
+      {inconsistencies}
+
+      规则: 如果 TC ID 包含 E2E，则验证方式要求中「浏览器交互测试」必须为 ✅ 必需或 ⚠️ 推荐。
+            如果 TC ID 包含 VIS，则「视觉验证」必须为 ✅ 必需或 ⚠️ 推荐。
+
+      操作: 调整 TC ID 的 VTYPE 代号，或修改验证方式要求等级。
+
+
+gate-test-report:
+  missing_test_report:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试报告缺失 — 无法标记任务完成
+
+      PROJECT_STATUS.md 中以下任务被标记为完成，
+      但缺少对应的测试报告或报告未包含 PASS：
+
+      {missing_tasks}
+
+      规则: 子智能体完成后必须先通过 Tester Agent 验证 (Step 5)
+      操作: 启动 Tester Agent 验证该任务，PASS 后再更新状态
+      路径: life_cycle_process/{{domain}}/phase-2-development/test-reports/{{task-id}}.md
+
+
+require-test-cases:
+  no_test_cases_file:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: Dev Agent 启动需要测试用例
+
+      Task: {task_id}
+
+      TDD: test-cases 必须先于代码存在 (P0 规则)
+
+      操作:
+        1. 如尚未规划 → 先启动 Planner Agent 生成 dev-plan + test-cases
+        2. 如已有 test-cases → 检查文件名是否匹配 "{task_id}.md"
+        3. 如文件名不匹配 → 修改 Agent description 使用正确的 task ID
+
+      预期路径: life_cycle_process/{{domain}}/phase-2-development/test-cases/{task_id}.md
+
+
+require-vi-spec:
+  no_vi_spec:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: Prototype Designer 启动需要 VI 规范
+
+      VI 规范是产品级视觉决策，必须在启动原型设计师之前完成。
+
+      Agent: {subagent_type}
+      描述: {description}
+
+      编排者必须先使用设计系统决策引擎确定 VI 规范：
+        1. 读 PRD → 提取产品类型、行业、目标用户
+        2. 运行决策引擎:
+           python design-system/decision/search.py "{{关键词}}" --domain style
+           python design-system/decision/search.py "{{关键词}}" --domain color
+           python design-system/decision/search.py "{{关键词}}" --domain typography
+        3. 综合结果写 VI 规范 → life_cycle_process/{{domain}}/phase-1-design/vi-spec.html
+
+      参考格式: vi-spec-breakthrough.html
+
+
+require-opus-model:
+  non_opus_model:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: {subagent_type} Agent 必须使用 opus 模型
+
+      当前模型: "{model}"
+      要求模型: "opus"
+
+      P1 规则: 所有开发、测试、规划类子智能体必须 model: "opus"
+      这些任务需要深度推理能力（代码编写、测试验证、架构分析）
+
+      操作: 在 Agent 工具调用中添加 model: "opus"
+
+  model_not_specified:
+    level: warn
+    title: "Model Warning"
+    message: |
+      {subagent_type} Agent 未指定 model，将继承父模型。P1 规则建议 model: "opus" 以确保推理质量。
+
+
+gate-agent-launch:
+  wrong_agent_state:
+    level: block
+    title: "Agent Launch Blocked"
+    message: |
+      Gate: 任务 {task_id} 状态不允许启动 {agent_label}
+
+      当前状态: {current_state} — {current_state_label}
+      期望状态: {expected_state} — {expected_state_label}
+
+      {agent_label} 要求任务处于 [{expected_state}] 状态。
+
+      引擎自动管理状态流转，你不需要手动推进。请等待当前状态完成后重试。
+
+      {action_hint}
+
+
+validate-console-errors:
+  console_errors_detected:
+    level: block
+    title: "Console Errors Detected"
+    message: |
+      Gate: 测试报告包含 console 错误 — 零报错要求
+
+      报告: {file_path}
+      console 错误数: {error_count}
+
+      检测到的错误:
+      {examples}
+
+      控制台零报错是硬性要求。console.error = FAIL，无论 DOM 多正确。
+
+      操作:
+        1. 修复产生 console.error 的代码
+        2. 重新运行测试
+        3. 确保报告中无任何 console 错误后再提交
+
+
+validate-int-coverage:
+  int_coverage_insufficient:
+    level: block
+    title: "INT Coverage Insufficient"
+    message: |
+      Gate: INT 交互元素覆盖不足
+
+      报告: {file_path}
+      测试用例: {tc_path}
+
+      INT 用例数 (test-cases): {int_count}
+      实际点击验证数 (test-report): {actual_clicks}
+      最低要求 (80%): {threshold}
+
+      SKILL.md 规则: "交互元素逐个点击 — 每个可见可点击元素必须用 Playwright 实际点击验证"
+
+      操作:
+        1. 重新启动 Tester Agent
+        2. 对 test-cases 中每个 INT 用例，用 Playwright 实际点击对应元素
+        3. 验证点击后的 DOM 变化（Modal 弹出 / 列表变化 / Toast 出现）
+        4. 禁止用 store/逻辑层测试替代 DOM 点击
+
+
+validate-test-methodology:
+  missing_required_verification:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试报告缺少测试用例要求的必需验证
+
+      报告: {file_path}
+      测试用例: {tc_path}
+
+      测试用例明确要求以下验证方式，但报告中没有相应证据:
+      {missing}
+
+      报告中的证据:
+      {evidence}
+
+      操作: 重新启动 Tester Agent，按测试用例的验证方式要求执行。
+        前端任务: npm run dev → Playwright 浏览器操作 → 截图验证
+        后端任务: 启动 API 服务 → HTTP 请求 → 断言状态码/响应体
+
+  missing_recommended_verification:
+    level: warn
+    title: "Verification Warning"
+    message: |
+      提示: 建议补充以下验证
+
+      报告: {file_path}
+      测试用例建议（推荐等级）但报告中缺少:
+      {missing}
+
+  summary_checklist_mismatch:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 验证执行摘要与测试用例要求不一致
+
+      报告: {file_path}
+      测试用例: {tc_path}
+
+      测试用例要求以下验证为「必需」，但报告的「验证执行摘要」中显示未完成:
+
+      {failures}
+
+      Tester 在「验证执行摘要」中自己承认未执行必需验证。
+      这是比关键词匹配更可靠的判定依据。
+
+      操作: 重新启动 Tester Agent，完整执行全部必需验证。
+        前端任务: npm run dev → Playwright 浏览器操作 → 截图 → visual_test.py
+        后端任务: 启动 API 服务 → HTTP 请求 → 断言状态码/响应体
+
+  explicit_static_declaration:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试报告声明为静态审查 — 拒绝
+
+      文件: {file_path}
+      检测到: "{static_pattern}"
+
+      这份测试报告承认只做了静态代码审查，没有运行代码。
+
+      同时，该测试用例缺少「验证方式要求」章节。
+      建议先更新测试用例，添加验证方式声明后再重新测试。
+
+      前端任务的 Tester 必须做到:
+        1. npm run dev (启动开发服务器)
+        2. Playwright 浏览器操作验证
+        3. 基于实际运行结果写测试报告
+
+  dense_line_refs_no_runtime_tools:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试报告疑似纯静态审查 — 拒绝
+
+      文件: {file_path}
+      源码行号引用: {line_ref_count} 处
+      运行时工具证据: 无
+
+      该测试用例缺少「验证方式要求」章节。
+      建议: 先更新 test-cases/{{task-id}}.md 添加验证方式声明，
+      明确标注哪些验证是必需的，然后重新运行 Tester Agent。
+
+  missing_execution_summary:
+    level: warn
+    title: "Verification Warning"
+    message: |
+      提示: 测试报告缺少「验证执行摘要」章节
+
+      报告: {file_path}
+
+      建议 Tester Agent 在报告开头添加「验证执行摘要」checklist，
+      明确标注每项验证的完成状态 ([x] 已完成 / [ ] 未完成)。
+      这将使交叉验证更可靠。
+
+  no_unforgeable_evidence:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试报告缺少不可伪造的执行证据
+
+      报告: {file_path}
+      测试用例: {tc_path}
+
+      报告包含工具引用文字，但缺少只有实际执行才能产生的输出:
+      {missing_unforgeable}
+
+      不可伪造证据包括:
+        - run-e2e-interactions.py 的 "E2E Results: X/Y steps PASS" 输出
+        - run-api-tests.py 的 "Results: X/Y PASS" 输出
+        - test-reports/screenshots/ 下的 .png 文件
+        - test-reports/{{task-id}}-e2e-scenarios.json 场景文件
+
+      操作: 重新运行测试脚本，将实际命令行输出粘贴到报告中。
+
+  filesystem_artifacts_missing:
+    level: block
+    title: "Gate Blocked"
+    message: |
+      Gate: 测试执行的文件系统产物缺失
+
+      报告: {file_path}
+      缺失产物: {missing_artifacts}
+
+      测试声称已执行，但以下文件不存在:
+      {artifact_details}
+
+      操作: 重新运行测试，确保以下文件实际生成:
+        - test-reports/{{task-id}}-e2e-scenarios.json (E2E 场景)
+        - test-reports/screenshots/*.png (截图证据)
+        - test-reports/{{task-id}}-api-scenarios.json (API 场景)
+
+  insufficient_test_depth:
+    level: block
+    title: "Insufficient Test Depth"
+    message: |
+      Gate: 测试深度不足 — 报告有执行证据但仅有浅层验证
+
+      文件: {file_path}
+      测试用例: {tc_path}
+      最大深度: 仅达到 {max_depth}
+
+      问题:
+      {issues}
+
+      当前报告包含 E2E 执行证据（如 Playwright 运行输出），
+      但验证步骤仅达到 {max_depth} 级别。
+
+      L1（页面可访问）+ L2（元素存在）不能代替测试。
+      - L1: page.goto → 页面能打开
+      - L2: count > 0 → 元素渲染了
+      - L3: page.click → 点了按钮有反馈
+      - L4: 操作→持久化→刷新→验证数据保持 ← 最低 PASS 标准
+
+      报告说你 PASS 了，但实际只验证到 "{max_depth}" 层级。
+      {hint}
+
+      操作: 重新运行 E2E 测试，确保测试场景包含:
+        1. 实际点击/输入操作（不只是 page.goto + count）
+        2. 操作后页面刷新的持久化验证（page.reload + assert）
+        3. Network 请求/响应断言（waitForResponse）
+
+
+validate-v-task-exists:
+  asset_spec_without_v_tasks:
+    level: block
+    title: "Missing V Tasks"
+    message: |
+      Gate: dev-plan 引用了 asset-spec 但缺少 V 任务
+
+      文件: {file_path}
+
+      检测到 dev-plan 引用了美术资产相关内容（asset-spec / 美术资产），
+      但没有找到任何 V 类型任务（V01, V02, ...）。
+
+      SKILL.md 规则: "V 任务是一等公民 — 存在 asset-spec 时，dev-plan 必须包含 V 任务"
+
+      操作:
+        1. 退回 Planner Agent
+        2. 为每个 asset-spec 中的 P0 类别创建 V 任务
+        3. V 任务 ID 格式: V01, V02, V03, ...
+        4. 重新生成 dev-plan
+
+
+block-direct-edit:
+  direct_edit_blocked:
+    level: block
+    title: "主智能体编辑被拦截"
+    message: |
+      文件: {file_path}
+      原因: 该文件位于功能域源码目录下
+      功能域: {domain_list}
+      规则: 主智能体禁止直接 Edit/Write 业务源码
+      操作: 请使用 Agent 工具创建子智能体（model: "opus"）来执行此修改
+
+
+check-lifecycle-phase:
+  phase_jump:
+    level: warn
+    title: "阶段跳跃警告"
+    message: |
+      LIFECYCLE.md: Phase {from_phase} → Phase {to_phase} 跳跃
+
+      功能域: {domain}
+      当前阶段: Phase {from_phase} → 目标阶段: Phase {to_phase}
+
+      {missing_section}
+
+      如果这是有意的（如用户明确要求跳过某阶段），忽略此警告。
+      否则请按 Phase 0→1→2→3 顺序推进，每阶段出口门禁必须通过。
+
+  missing_interaction_spec:
+    level: warn
+    title: "缺少系统交互规格"
+    message: |
+      警告: Phase 1 缺少系统交互规格 (system-interaction-spec.md)
+
+      功能域: {domain}
+
+      系统交互规格定义了原型无法表达的系统行为：
+        - 每个 UI 元素的完整交互（拖拽、右键、双击、键盘，不只是点击）
+        - 键盘/快捷键映射（Space+拖拽、Ctrl+Z 等）
+        - 状态机（idle → selected → dragging → dropped）
+        - 数据持久化（CRUD 操作、自动保存、刷新后数据保持）
+        - 业务规则（校验逻辑、违反行为）
+        - 非功能行为（错误处理、空状态、加载态、撤销重做）
+
+      没有此文件，Phase 2 开发只会复刻原型的视觉表面。
+      结果：系统"看着像原型但用不了"——卡片拖不动、快捷键没反应、数据不保存。
+
+      补救步骤:
+        1. 编排者读 PRD + 原型 + 设计文档
+        2. 按 SKILL.md §6.3 引导性问题逐维度推导系统行为
+        3. 按 §1-§7 统一格式写入 phase-1-design/system-interaction-spec.md
+        4. 用户确认（原型 = 长什么样，交互规格 = 怎么用）
+        5. 更新 LIFECYCLE.md
+
+
+remind-after-dev:
+  dev_completed:
+    level: info
+    title: "提醒: Dev Agent 已完成"
+    message: |
+      {description}
+
+      下一步强制步骤: 启动 Tester Agent (Step 5)
+
+      Agent(model: "opus", subagent_type: "tester-functional", ...)
+
+      Tester Agent 不是可选项 — 这是 TDD 流程的强制验证环节。
+      只有 Tester Agent 返回 PASS 后才能更新 PROJECT_STATUS.md。

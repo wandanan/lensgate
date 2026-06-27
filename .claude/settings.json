@@ -1,0 +1,94 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'block-direct-edit.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'gate-test-report.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'check-lifecycle-phase.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'validate-test-case.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'validate-v-task-exists.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'gate-agent-launch.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'require-test-cases.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'require-opus-model.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'require-vi-spec.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'remind-after-dev.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'engine-observer.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'validate-test-methodology.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'validate-console-errors.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import subprocess,sys,os;sys.stdout.reconfigure(encoding='utf-8',errors='replace');sys.stderr.reconfigure(encoding='utf-8',errors='replace');gd=subprocess.check_output(['git','rev-parse','--git-common-dir'],text=True).strip();hd=os.path.join(os.path.dirname(gd),'.claude','hooks');sys.path.insert(0,hd);import hook_util; hook_util.start_watchdog();exec(open(os.path.join(hd,'validate-int-coverage.py'),encoding='utf-8').read().split('if __name__')[0]);main()\""
+          }
+        ]
+      }
+    ]
+  }
+}
