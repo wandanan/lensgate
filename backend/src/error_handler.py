@@ -157,8 +157,7 @@ def check_config(config: ProxyConfig) -> None:
     clear, non-zero exit code.
 
     Raises:
-        RuntimeError: If ``VISION_API_KEY`` or ``TARGET_DEFAULT_API_KEY``
-                      is empty / unset.
+        RuntimeError: If ``VISION_API_KEY`` is empty / unset.
     """
     try:
         config.validate_required()

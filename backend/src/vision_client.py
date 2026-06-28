@@ -171,7 +171,7 @@ class QwenVisionClient:
                                label, last_error, attempt + 1, _MAX_RETRIES + 1)
 
             except httpx.TimeoutException:
-                last_error = f"timeout ({timeout}s)"
+                last_error = f"timeout ({self._timeout}s)"
                 logger.warning("Vision [%s]: %s (attempt %d/%d)",
                                label, last_error, attempt + 1, _MAX_RETRIES + 1)
             except httpx.RequestError as e:

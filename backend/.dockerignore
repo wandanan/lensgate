@@ -13,7 +13,7 @@ __pycache__/
 # Tests (not needed at runtime)
 tests/
 
-# Environment (injected at runtime)
+# Environment (.env excluded, config.ini IS baked in)
 .env
 .env.*
 

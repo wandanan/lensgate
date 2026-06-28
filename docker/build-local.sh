@@ -91,6 +91,19 @@ if [ ! -f "$PROJECT_DIR/$COMPOSE_FILE" ]; then
     exit 1
 fi
 
+# .env 缺失时从 .env.example 创建
+ENV_FILE="$PROJECT_DIR/backend/.env"
+ENV_EXAMPLE="$PROJECT_DIR/backend/.env.example"
+if [ ! -f "$ENV_FILE" ]; then
+    if [ -f "$ENV_EXAMPLE" ]; then
+        cp "$ENV_EXAMPLE" "$ENV_FILE"
+        log_warn ".env 不存在，已从 .env.example 创建，请编辑填入 API Key"
+        log_warn "  $ENV_FILE"
+    else
+        log_warn ".env 和 .env.example 均不存在，请手动创建 .env 文件"
+    fi
+fi
+
 # 1. 确保 Docker 在运行
 ensure_docker_running
 

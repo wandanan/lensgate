@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request
 
 from backend.src.cache_store import cache
 from backend.src.config import ProxyConfig
-from backend.src.decision_engine import DecisionEngine
+from backend.src.decision_engine import DecisionEngine, DecisionResult
 from backend.src.error_handler import (
     InvalidRequestError,
     PayloadTooLargeError,
@@ -29,6 +29,7 @@ from backend.src.format_detector import detect_format, parse_anthropic_request, 
 from backend.src.image_extractor import (
     extract_file_metadata,
     extract_images,
+    has_images,
     image_hash,
 )
 from backend.src.logging_config import setup_logging
@@ -97,13 +98,8 @@ async def health():
 # ---------------------------------------------------------------------------
 
 
-@app.post("/{target:path}/v1/messages")
-async def anthropic_messages(request: Request, target: str):
-    return await _run_pipeline(request, target)
-
-
-@app.post("/{target:path}/v1/chat/completions")
-async def openai_chat_completions(request: Request, target: str):
+@app.api_route("/{target:path}", methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"])
+async def proxy_endpoint(request: Request, target: str):
     return await _run_pipeline(request, target)
 
 
@@ -117,18 +113,23 @@ async def _run_pipeline(request: Request, target: str):
         except ValueError:
             pass
 
+    # --- Target URL (uses request path as-is, no suffix appended) ---
+    target_url = _resolve_target_url(request, target)
+    target_api_key = getattr(request.state, "target_api_key", "")
+
+    # --- Non-POST (GET/HEAD/OPTIONS) pass-through without pipeline ---
+    if request.method != "POST":
+        return await _forward_raw(request, target_url, target_api_key)
+
     # --- Parse JSON ---
     try:
         body = await request.json()
     except Exception:
         raise InvalidRequestError("Failed to parse JSON request body")
 
-    # --- Target config ---
-    target_base_url = _resolve_target_base_url(request, target)
-    target_api_key = getattr(request.state, "target_api_key", "")
     target_config = TargetModelConfig(
         model_id=body.get("model", ""),
-        api_base=target_base_url,
+        api_base=target_url,
         api_key=target_api_key,
     )
 
@@ -156,33 +157,49 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
         else parse_openai_request(body)
     )
 
-    # --- Stage 2: Image check + short-circuit ---
+    # --- Stage 2: Image check ---
     new_images = await extract_images(proxy_request, latest_only=True)
 
-    if not new_images and not cache.entries():
-        logger.info("Pure-text fast path (no images, no cache)")
+    # PATH C — pure text (no images anywhere in this request)
+    if not new_images and not has_images(proxy_request):
+        logger.info("Pure-text fast path (no images in request)")
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
-    # --- Stage 3: Decision engine (only when images or cache exist) ---
-    user_msgs = _extract_user_messages(proxy_request, last_n=5)
+    # --- Stage 3: Decision engine (only when cache has entries to select from) ---
     cached = cache.entries()
 
-    decision = await decision_engine.decide(user_msgs, cached, new_image_count=len(new_images))
+    if cached:
+        user_msgs = _extract_user_messages(proxy_request, last_n=5)
+        decision = await decision_engine.decide(user_msgs, cached, new_image_count=len(new_images))
+    else:
+        decision = _default_decision(len(new_images))
+
     logger.info("Decision: mode=%s hashes=%s focus=%.80s reasoning=%s",
                 decision.mode, decision.image_hashes, decision.focus_prompt, decision.reasoning)
 
+    # PATH A/B — new images in latest message
     if new_images:
         logger.info("New images in latest message: %d", len(new_images))
         vision_results = await _vision_and_cache(new_images, decision, proxy_request)
         proxy_request = rewriter.rewrite(proxy_request, vision_results)
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
-    # No new images — use decision result.
-    if not decision.image_hashes:
-        logger.info("Pure-text fast path (decision: no relevant images)")
+    # --- Historical images only ---
+
+    # PATH E — no cache: extract all, run vision on all
+    if not cached:
+        logger.info("Images in history (no cache), extracting all")
+        all_images = await extract_images(proxy_request, latest_only=False)
+        decision = _default_decision(len(all_images))
+        vision_results = await _vision_and_cache(all_images, decision, proxy_request)
+        proxy_request = rewriter.rewrite(proxy_request, vision_results)
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
-    # Historical images: extract by hash
+    # PATH D — decision engine selects which historical images to re-vision
+    if not decision.image_hashes:
+        logger.info("Decision: skip (no relevant images for current question)")
+        return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
+
     all_images = await extract_images(proxy_request, latest_only=False)
     target_images, seen_hashes = _filter_images_by_hash(all_images, decision.image_hashes)
 
@@ -279,6 +296,23 @@ async def _vision_compare_locked(
 # ---------------------------------------------------------------------------
 
 
+async def _forward_raw(request: Request, target_url: str, api_key: str):
+    """Pass-through GET/HEAD/OPTIONS to target without pipeline processing."""
+    client = _get_target_client()
+    resp = await client.forward_raw(
+        method=request.method,
+        url=target_url,
+        headers=dict(request.headers),
+        api_key=api_key,
+    )
+    from fastapi.responses import Response
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=dict(resp.headers),
+    )
+
+
 async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
     client = _get_target_client()
     try:
@@ -301,27 +335,36 @@ async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_target_base_url(request: Request, target: str) -> str:
-    """Resolve target API base URL from x-target-base-url header, or path routing.
+def _resolve_target_url(request: Request, target: str) -> str:
+    """Resolve the full target URL from x-target-base-url header or path routing.
 
-    Header-based routing (preferred)::
-        x-target-base-url: https://ark.cn-beijing.volces.com/api/coding
+    The client request path is forwarded as-is — no suffix is appended.
 
-    Path-based routing (fallback)::
-        POST /{host}/v1/messages  →  https://{host}
+    Header-based routing::
+        x-target-base-url: https://api.deepseek.com/anthropic
+        Request:           POST /v1/messages
+        →                  https://api.deepseek.com/anthropic/v1/messages
+
+    Path-based routing::
+        POST /api.deepseek.com/anthropic/v1/messages?beta=true
+        →                  https://api.deepseek.com/anthropic/v1/messages?beta=true
     """
     header_url = request.headers.get("x-target-base-url")
     if header_url:
-        return header_url.rstrip("/")
+        return header_url.rstrip("/") + "/" + request.url.path.lstrip("/")
 
-    scheme = "https"
     t = target
+    scheme = "https"
     if t.startswith("http."):
         scheme = "http"
         t = t[5:]
 
-    logger.info("Target: %s://%s", scheme, t)
-    return f"{scheme}://{t}"
+    url = f"{scheme}://{t}"
+    if request.url.query:
+        url += "?" + request.url.query
+
+    logger.info("Target: %s", url)
+    return url
 
 
 def _filter_images_by_hash(
@@ -336,6 +379,17 @@ def _filter_images_by_hash(
             seen.add(h)
             target.append(img)
     return target, seen
+
+
+def _default_decision(image_count: int = 0) -> DecisionResult:
+    """Build a default decision when there's no cache to consult."""
+    mode = "compare" if image_count >= 2 else "single"
+    return DecisionResult(
+        image_hashes=[],
+        focus_prompt="请描述这张图片的内容",
+        mode=mode,
+        reasoning="no cache — processing all images",
+    )
 
 
 def _make_label(desc: str) -> str:

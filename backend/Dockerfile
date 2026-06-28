@@ -18,9 +18,9 @@ COPY . ./backend/
 RUN mkdir -p /app/valuation && chmod 777 /app/valuation
 
 ENV HOST=0.0.0.0
-ENV PORT=8080
+ENV PORT=9856
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 8080
+EXPOSE 9856
 
-CMD ["uvicorn", "backend.src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "backend.src.main:app", "--host", "0.0.0.0", "--port", "9856"]

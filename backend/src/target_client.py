@@ -77,21 +77,11 @@ class TargetModelClient:
     async def forward(
         self, request_body: dict, config: TargetModelConfig
     ) -> httpx.Response:
-        """Forward a non-streaming request to the target model.
+        """Forward a non-streaming POST request to the target model.
 
-        Sends ``POST {api_base}/v1/messages`` with a 60-second timeout.
-        httpx.HTTPStatusError and httpx.TimeoutException are re-raised;
-        the ResponseHandler (C07) is responsible for mapping them to
-        client-facing 503/504 errors.
-
-        Parameters:
-            request_body: The (possibly rewritten) JSON request body to send.
-            config:       Resolved target model configuration.
-
-        Returns:
-            The raw ``httpx.Response`` from the target model API.
+        Uses ``config.api_base`` as the full target URL (no suffix appended).
         """
-        url = f"{config.api_base}/v1/messages"
+        url = config.api_base
         headers = self._build_headers(config)
         client = self._get_client()
 
@@ -103,29 +93,39 @@ class TargetModelClient:
         )
         return response
 
+    async def forward_raw(
+        self, method: str, url: str, headers: dict[str, str], api_key: str,
+    ) -> httpx.Response:
+        """Forward a raw request (GET/HEAD/etc.) to the target without body processing.
+
+        Strips hop-by-hop headers and injects auth.
+        """
+        # Remove hop-by-hop / host headers
+        fwd_headers = {
+            k: v for k, v in headers.items()
+            if k.lower() not in (
+                "host", "content-length", "transfer-encoding",
+                "connection", "x-api-key", "x-target-base-url",
+            )
+        }
+        if api_key:
+            fwd_headers["x-api-key"] = api_key
+
+        client = self._get_client()
+        return await client.request(
+            method, url, headers=fwd_headers, timeout=httpx.Timeout(30.0),
+        )
+
     async def forward_stream(
         self, request_body: dict, config: TargetModelConfig
     ) -> AsyncGenerator[str, None]:
-        """Forward a streaming request to the target model.
+        """Forward a streaming POST request to the target model.
 
-        Sends ``POST {api_base}/v1/messages`` with ``stream: true`` and
-        a 120-second timeout, then yields each line from the upstream SSE
-        stream.  Lines are yielded as received — empty lines are skipped.
-
-        The connection is automatically closed when the generator is
-        finalised (client disconnect or stream end).
-
-        Parameters:
-            request_body: The (possibly rewritten) JSON request body.
-            config:       Resolved target model configuration.
-
-        Yields:
-            Each non-empty SSE line from the upstream response.
+        Uses ``config.api_base`` as the full target URL.
         """
-        url = f"{config.api_base}/v1/messages"
+        url = config.api_base
         headers = self._build_headers(config)
 
-        # Ensure the streaming flag is set on the outgoing body.
         body: dict = {**request_body, "stream": True}
         client = self._get_client()
 

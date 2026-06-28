@@ -109,17 +109,18 @@ class _MockStreamCtx:
 
 @pytest.mark.asyncio
 async def test_forward_sends_correct_endpoint():
-    """POST URL is ``{api_base}/v1/messages``."""
+    """POST URL is ``config.api_base`` directly (no suffix appended)."""
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = _an200_response()
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
-        await client.forward(_make_request_body(), _make_config())
+        config = _make_config(api_base="https://api.example.com/v1/messages")
+        await client.forward(_make_request_body(), config)
 
     mock_client.post.assert_called_once()
     url = mock_client.post.call_args[0][0]
-    assert url == "https://ark.cn-beijing.volces.com/api/coding/v1/messages"
+    assert url == "https://api.example.com/v1/messages"
 
 
 # ---------------------------------------------------------------------------
