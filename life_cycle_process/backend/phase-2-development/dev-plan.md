@@ -11,18 +11,18 @@
 
 | # | 任务ID | 标题 | 状态 | 依赖 | 预计产出 |
 |---|--------|------|------|------|----------|
-| 0 | A01 | 项目基础设施 | ⏳ | — | FastAPI app, pyproject.toml, Dockerfile, 入口文件 |
-| 1 | A02 | 配置管理 + 数据模型 | ⏳ | A01 | config.py, models.py (ProxyRequest/Message/ContentBlock) |
-| 2 | B01 | 请求路由 + Format Detector | ⏳ | A01, A02 | routes/*.py, format_detector.py |
-| 3 | B02 | Image Extractor | ⏳ | A02 | image_extractor.py |
-| 4 | C01 | Model Router + 健康检查 | ⏳ | A02 | model_router.py, GET /health |
-| 5 | C02 | Vision Client (Qwen 3.7 Plus) | ⏳ | A02, B02 | vision_client.py |
-| 6 | C03 | Request Rewriter | ⏳ | A02, C02 | request_rewriter.py |
-| 7 | C04 | Target Client (Volcengine) | ⏳ | A02, C01 | target_client.py |
-| 8 | C05 | Response Handler (SSE + JSON) | ⏳ | A02, C04 | response_handler.py |
-| 9 | C06 | API Key 校验 + 纯文本直通 | ⏳ | B01, B02 | middleware/auth.py, pipeline 集成 |
-| 10 | C07 | 错误处理 + 降级 | ⏳ | C04, C05 | error_handler.py |
-| 11 | C08 | 日志 + 监控 | ⏳ | A01 | logging_config.py |
+| 0 | A01 | 项目基础设施 | ✅ | — | FastAPI app, pyproject.toml, Dockerfile, 入口文件 |
+| 1 | A02 | 配置管理 + 数据模型 | ✅ | A01 | config.py, models.py (ProxyRequest/Message/ContentBlock) |
+| 2 | B01 | 请求路由 + Format Detector | ✅ | A01, A02 | routes/*.py, format_detector.py |
+| 3 | B02 | Image Extractor | ✅ | A02 | image_extractor.py |
+| 4 | C01 | Model Router + 健康检查 | ✅ | A02 | model_router.py, GET /health |
+| 5 | C02 | Vision Client (Qwen 3.7 Plus) | ✅ | A02, B02 | vision_client.py |
+| 6 | C03 | Request Rewriter | ✅ | A02, C02 | request_rewriter.py |
+| 7 | C04 | Target Client (Volcengine) | ✅ | A02, C01 | target_client.py |
+| 8 | C05 | Response Handler (SSE + JSON) | ✅ | A02, C04 | response_handler.py |
+| 9 | C06 | API Key 校验 + 纯文本直通 | ✅ | B01, B02 | middleware/auth.py, pipeline 集成 |
+| 10 | C07 | 错误处理 + 降级 | ✅ | C04, C05 | error_handler.py |
+| 11 | C08 | 日志 + 监控 | ✅ | A01 | logging_config.py |
 
 状态： ⏳ 待办 | 🔄 进行中 | ✅ 完成 | ⚠️ 低质量通过
 
