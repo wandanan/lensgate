@@ -22,7 +22,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from backend.src.model_router import ModelRouter
 from backend.src.models import TargetModelConfig
 from backend.src.target_client import TargetModelClient
 
@@ -42,10 +41,6 @@ def _make_config(
         api_base=api_base,
         api_key=api_key,
     )
-
-
-def _make_router() -> ModelRouter:
-    return ModelRouter({"default": _make_config()})
 
 
 def _make_request_body() -> dict:
@@ -119,7 +114,7 @@ async def test_forward_sends_correct_endpoint():
     mock_client.post.return_value = _an200_response()
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         await client.forward(_make_request_body(), _make_config())
 
     mock_client.post.assert_called_once()
@@ -139,7 +134,7 @@ async def test_forward_carries_correct_auth_headers():
     mock_client.post.return_value = _an200_response()
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         config = _make_config(api_key="test-key-123")
         await client.forward(_make_request_body(), config)
 
@@ -162,7 +157,7 @@ async def test_forward_returns_json_response():
     mock_client.post.return_value = _an200_response()
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         response = await client.forward(_make_request_body(), _make_config())
 
     assert response.status_code == 200
@@ -193,7 +188,7 @@ async def test_forward_stream_yields_sse_lines():
     mock_client.stream.return_value = mock_ctx
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         yielded: list[str] = []
         async for line in client.forward_stream(_make_request_body(), _make_config()):
             yielded.append(line)
@@ -218,7 +213,7 @@ async def test_forwarding_target_200():
     mock_client.post.return_value = _an200_response()
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         response = await client.forward(_make_request_body(), _make_config())
 
     assert response.status_code == 200
@@ -248,7 +243,7 @@ async def test_forwarding_target_500_re_raises():
     mock_client.post.return_value = mock_response
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         response = await client.forward(_make_request_body(), _make_config())
 
     # The raw 500 status is passed through; C07 will map to 503.
@@ -272,7 +267,7 @@ async def test_forwarding_timeout_re_raises():
     mock_client.post.side_effect = httpx.TimeoutException("Read timeout")
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         with pytest.raises(httpx.TimeoutException, match="Read timeout"):
             await client.forward(_make_request_body(), _make_config())
 
@@ -305,7 +300,7 @@ async def test_forward_stream_sets_stream_true_in_body():
     }
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         async for _ in client.forward_stream(body_without_stream, _make_config()):
             pass
 
@@ -341,7 +336,7 @@ async def test_forward_stream_client_disconnect_releases_stream():
     mock_client.stream.return_value = mock_ctx
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         gen = client.forward_stream(_make_request_body(), _make_config())
 
         # Consume only the first line, then simulate disconnect
@@ -377,13 +372,13 @@ async def test_forward_stream_skips_empty_lines():
     mock_client.stream.return_value = mock_ctx
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         yielded: list[str] = []
         async for line in client.forward_stream(_make_request_body(), _make_config()):
             yielded.append(line)
 
-    assert len(yielded) == 2, f"expected 2 non-empty lines, got {len(yielded)}"
-    assert all(line.startswith("data:") for line in yielded)
+    assert len(yielded) == 4, f"expected 4 lines (2 data + 2 newline separators), got {len(yielded)}"
+    assert all(line.startswith("data:") for line in yielded if line.strip())
 
 
 @pytest.mark.asyncio
@@ -393,7 +388,7 @@ async def test_client_close_is_idempotent():
     mock_client.post.return_value = _an200_response()
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         await client.forward(_make_request_body(), _make_config())
         await client.close()
         await client.close()  # second call is a no-op
@@ -409,7 +404,7 @@ async def test_forward_timeout_set_to_60s():
     mock_client.post.return_value = _an200_response()
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         await client.forward(_make_request_body(), _make_config())
 
     _, kwargs = mock_client.post.call_args
@@ -428,7 +423,7 @@ async def test_forward_stream_timeout_set_to_120s():
     mock_client.stream.return_value = mock_ctx
 
     with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
-        client = TargetModelClient(_make_router())
+        client = TargetModelClient()
         async for _ in client.forward_stream(_make_request_body(), _make_config()):
             pass
 

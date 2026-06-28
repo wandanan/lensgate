@@ -1,35 +1,36 @@
 """API runtime tests for route handlers.
 
 Coverage:
-- TC-B01-SYS-001: valid Anthropic request → 200
-- TC-B01-SYS-002: invalid JSON → 400
-- TC-B01-SYS-003: valid OpenAI request → 200
+- Error handling (invalid JSON, missing fields)
+- Route existence and middleware
+- Forwarding with mocked target client
 """
 
 from __future__ import annotations
 
 import base64
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.src.app import app
+# Ensure required env vars are set before importing the app module.
+os.environ.setdefault("VISION_API_KEY", "test-vision-key")
+
+from backend.src.app import app  # noqa: E402
 
 client = TestClient(app)
 
 # Pre-computed sample base64-encoded image data
 _SAMPLE_B64 = base64.b64encode(b"fake-image-data").decode()
 
+TEST_TARGET = "test-target"
+
 
 # ---------------------------------------------------------------------------
 # Non-API quick checks (smoke)
 # ---------------------------------------------------------------------------
-
-
-def test_root_200():
-    resp = client.get("/")
-    assert resp.status_code == 200
-    assert resp.json()["service"] == "多模态代理网关"
 
 
 def test_health_200():
@@ -39,37 +40,14 @@ def test_health_200():
 
 
 # ---------------------------------------------------------------------------
-# TC-B01-SYS-001: valid Anthropic text request → 200
-# ---------------------------------------------------------------------------
-
-
-def test_anthropic_valid_text_request():
-    """System behaviour — Anthropic pure-text request returns 200 and parsed info."""
-    body = {
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 100,
-        "messages": [{"role": "user", "content": "hello"}],
-    }
-    resp = client.post("/v1/messages", json=body)
-    assert resp.status_code == 200
-
-    data = resp.json()
-    assert data["status"] == "forwarded"
-    assert data["source_format"] == "anthropic"
-    assert data["target_model"] == "claude-sonnet-4-6"
-    assert data["message_count"] == 1
-    assert data["image_count"] == 0
-
-
-# ---------------------------------------------------------------------------
-# TC-B01-SYS-002: invalid JSON → 400
+# Error paths — invalid JSON
 # ---------------------------------------------------------------------------
 
 
 def test_anthropic_invalid_json_400():
-    """System behaviour — invalid JSON returns 400 with error detail."""
+    """Invalid JSON returns 400 with error detail."""
     resp = client.post(
-        "/v1/messages",
+        f"/{TEST_TARGET}/v1/messages",
         content=b"this is not json {{{",
         headers={"Content-Type": "application/json"},
     )
@@ -78,7 +56,7 @@ def test_anthropic_invalid_json_400():
     assert data["error"] == "invalid_request"
 
     resp2 = client.post(
-        "/v1/messages",
+        f"/{TEST_TARGET}/v1/messages",
         content=b"",
         headers={"Content-Type": "application/json"},
     )
@@ -87,109 +65,128 @@ def test_anthropic_invalid_json_400():
     assert data2["error"] == "invalid_request"
 
 
-# ---------------------------------------------------------------------------
-# TC-B01-SYS-003: valid OpenAI request → 200
-# ---------------------------------------------------------------------------
-
-
-def test_openai_valid_text_request():
-    """System behaviour — OpenAI pure-text request returns 200 and parsed info."""
-    body = {
-        "model": "gpt-4",
-        "messages": [{"role": "user", "content": "hello"}],
-    }
-    resp = client.post("/v1/chat/completions", json=body)
-    assert resp.status_code == 200
-
-    data = resp.json()
-    assert data["status"] == "forwarded"
-    assert data["source_format"] == "openai"
-    assert data["target_model"] == "gpt-4"
-    assert data["message_count"] == 1
-    assert data["image_count"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Additional route-level coverage
-# ---------------------------------------------------------------------------
-
-
-def test_anthropic_with_image_200():
-    """Anthropic request containing an image block is parsed correctly."""
-    body = {
-        "model": "claude",
-        "max_tokens": 100,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "describe this"},
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": _SAMPLE_B64,
-                        },
-                    },
-                ],
-            }
-        ],
-    }
-    resp = client.post("/v1/messages", json=body)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["source_format"] == "anthropic"
-    assert data["image_count"] == 1
-
-
-def test_openai_with_image_url_200():
-    """OpenAI request containing an image_url part is parsed correctly."""
-    body = {
-        "model": "gpt-4",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "describe this"},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": "data:image/png;base64," + _SAMPLE_B64
-                        },
-                    },
-                ],
-            }
-        ],
-    }
-    resp = client.post("/v1/chat/completions", json=body)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["source_format"] == "openai"
-    assert data["image_count"] == 1
-
-
-def test_anthropic_stream_flag():
-    """Anthropic request with stream=true is reflected in response."""
-    body = {
-        "model": "claude",
-        "max_tokens": 100,
-        "stream": True,
-        "messages": [{"role": "user", "content": "hello"}],
-    }
-    resp = client.post("/v1/messages", json=body)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["stream"] is True
-
-
 def test_anthropic_invalid_json_400_openai_endpoint():
     """OpenAI endpoint also returns 400 on bad JSON."""
     resp = client.post(
-        "/v1/chat/completions",
+        f"/{TEST_TARGET}/v1/chat/completions",
         content=b"garbage",
         headers={"Content-Type": "application/json"},
     )
     assert resp.status_code == 400
     data = resp.json()
     assert data["error"] == "invalid_request"
+
+
+# ---------------------------------------------------------------------------
+# Valid requests — with mocked target client
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_target_response(body: dict | None = None) -> MagicMock:
+    if body is None:
+        body = {
+            "id": "msg_test_001",
+            "type": "message",
+            "role": "assistant",
+            "model": "deepseek-v3.2",
+            "content": [{"type": "text", "text": "Hello from mocked target!"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 5, "output_tokens": 10},
+        }
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = body
+    return resp
+
+
+def test_anthropic_valid_text_request():
+    """Anthropic pure-text request is forwarded and target response returned."""
+    body = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 100,
+        "messages": [{"role": "user", "content": "hello"}],
+    }
+    mock_resp = _make_mock_target_response()
+
+    with patch(
+        "backend.src.app._get_target_client"
+    ) as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.forward.return_value = mock_resp
+        mock_get_client.return_value = mock_client
+
+        resp = client.post(f"/{TEST_TARGET}/v1/messages", json=body)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["role"] == "assistant"
+    assert "Hello from mocked target!" in data["content"][0]["text"]
+
+
+def test_openai_valid_text_request():
+    """OpenAI pure-text request is forwarded and target response returned."""
+    openai_body = {
+        "id": "chatcmpl-123",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello from OpenAI!"},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    mock_resp = _make_mock_target_response(openai_body)
+    body = {
+        "model": "gpt-4",
+        "messages": [{"role": "user", "content": "hello"}],
+    }
+
+    with patch(
+        "backend.src.app._get_target_client"
+    ) as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.forward.return_value = mock_resp
+        mock_get_client.return_value = mock_client
+
+        resp = client.post(f"/{TEST_TARGET}/v1/chat/completions", json=body)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "chat.completion"
+
+
+def test_anthropic_stream_flag():
+    """Anthropic request with stream=true uses streaming forward path."""
+    body = {
+        "model": "claude",
+        "max_tokens": 100,
+        "stream": True,
+        "messages": [{"role": "user", "content": "hello"}],
+    }
+
+    mock_stream_resp = MagicMock()
+    mock_stream_resp.status_code = 200
+
+    with patch(
+        "backend.src.app._get_target_client"
+    ) as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.forward_stream.return_value = _make_async_gen(
+            ['data: {"type":"message_start"}\n', 'data: {"type":"message_stop"}\n']
+        )
+        mock_get_client.return_value = mock_client
+
+        resp = client.post(f"/{TEST_TARGET}/v1/messages", json=body)
+
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _make_async_gen(lines: list[str]):
+    for line in lines:
+        yield line

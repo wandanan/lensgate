@@ -117,7 +117,7 @@ async def test_recognize_sends_correct_request():
     # Verify the JSON payload.
     payload = call_args[1]["json"]
     assert payload["model"] == "qwen3.7-plus"
-    assert payload["max_tokens"] == 2000
+    assert payload["max_tokens"] == 4096
 
     # Verify the content contains an image_url block.
     messages = payload["messages"]
@@ -394,14 +394,14 @@ async def test_sys_429_retry_still_fails():
         mock_client = mock_client_cls.return_value
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(side_effect=[resp_429, resp_429])
+        mock_client.post = AsyncMock(return_value=resp_429)
 
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             result = await client.recognize(image)
 
     assert result == "[图片无法识别]"
-    assert mock_client.post.call_count == 2  # exactly 2 calls, no infinite retry
-    mock_sleep.assert_awaited_once_with(1.0)
+    assert mock_client.post.call_count == 6  # 1 initial + 5 retries
+    assert mock_sleep.await_count == 5
 
 
 # ============================================================================

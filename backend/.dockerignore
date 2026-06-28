@@ -1,0 +1,36 @@
+# Docker
+Dockerfile
+.dockerignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests (not needed at runtime)
+tests/
+
+# Environment (injected at runtime)
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Documents / artifacts
+docs/
+handoffs/
+life_cycle_process/
+
+# Images
+*.png
+*.jpg
+*.jpeg

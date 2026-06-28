@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 def test_app_title():
     """TC-A01-BLD-002: FastAPI app 创建无错误，title 非空且正确."""
     from backend.src.app import app
-    assert app.title == "多模态代理网关"
+    assert app.title == "TLMA - Text LLM Multimodal Agent"
     assert app.title != ""
 
 
@@ -32,8 +32,8 @@ def test_routes_exist():
     """TC-A01-LOG-001: 路由列表包含 /v1/messages、/v1/chat/completions、/health."""
     from backend.src.app import app
     route_paths = [route.path for route in app.routes]
-    assert "/v1/messages" in route_paths
-    assert "/v1/chat/completions" in route_paths
+    assert any(p.endswith("/v1/messages") for p in route_paths), f"routes: {route_paths}"
+    assert any(p.endswith("/v1/chat/completions") for p in route_paths), f"routes: {route_paths}"
     assert "/health" in route_paths
 
 

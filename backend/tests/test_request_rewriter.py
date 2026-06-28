@@ -107,9 +107,9 @@ def test_single_image_replaced():
         "ImageBlock should be replaced"
     )
     assert any(
-        isinstance(b, TextBlock) and "[图片 1/1 的描述：一张包含文字的截图]" in b.text
+        isinstance(b, TextBlock) and "[图片内容]" in b.text and "一张包含文字的截图" in b.text
         for b in content
-    ), "TextBlock should contain the numbered description"
+    ), "TextBlock should contain the description"
 
     # Non-image block preserved
     assert any(
@@ -155,9 +155,9 @@ def test_multiple_images_numbered():
 
     content = result.messages[0].content
     assert len(content) == 3
-    assert "[图片 1/3 的描述：结果A]" in content[0].text
-    assert "[图片 2/3 的描述：结果B]" in content[1].text
-    assert "[图片 3/3 的描述：结果C]" in content[2].text
+    assert "[图片内容]" in content[0].text and "结果A" in content[0].text
+    assert "[图片内容]" in content[1].text and "结果B" in content[1].text
+    assert "[图片内容]" in content[2].text and "结果C" in content[2].text
 
 
 # ============================================================================
@@ -201,7 +201,7 @@ def test_non_image_content_preserved():
     content = result.messages[0].content
     assert len(content) == 3
     assert content[0].text == "hello"
-    assert "[图片 1/1 的描述：图片描述]" in content[1].text
+    assert "[图片内容]" in content[1].text and "图片描述" in content[1].text
     assert content[2].text == "world"
 
 
@@ -245,7 +245,7 @@ def test_preserves_anthropic_format():
     # The content block should now be text, not image
     new_block = body["messages"][0]["content"][0]
     assert new_block["type"] == "text"
-    assert "[图片 1/1 的描述：描述内容]" in new_block["text"]
+    assert "[图片内容]" in new_block["text"] and "描述内容" in new_block["text"]
 
 
 # ============================================================================
@@ -278,7 +278,7 @@ def test_image_only_content_forwarded():
     content = result.messages[0].content
     assert len(content) == 1
     assert isinstance(content[0], TextBlock)
-    assert "[图片 1/1 的描述：这张图显示了一个日落场景]" in content[0].text
+    assert "[图片内容]" in content[0].text and "这张图显示了一个日落场景" in content[0].text
 
 
 # ============================================================================
@@ -323,7 +323,7 @@ def test_two_images_fully_replaced():
     # Two TextBlock with "图片" keyword
     text_blocks = [b for b in content if isinstance(b, TextBlock)]
     assert len(text_blocks) == 2
-    assert all("图片" in b.text for b in text_blocks)
+    assert all("[图片内容]" in b.text for b in text_blocks)
 
     # Verify original_body also has zero image blocks
     body_blocks = result.original_body["messages"][0]["content"]
@@ -360,7 +360,7 @@ def test_image_only_pure_text_output():
     content = result.messages[0].content
     assert len(content) == 1
     assert isinstance(content[0], TextBlock)
-    assert "[图片 1/1 的描述：含文字的UI截图]" in content[0].text
+    assert "[图片内容]" in content[0].text and "含文字的UI截图" in content[0].text
 
     # Verify rewritten body is non-empty and has text content
     body = result.original_body

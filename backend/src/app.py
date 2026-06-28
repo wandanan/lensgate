@@ -4,27 +4,36 @@ FastAPI application — TLMA (Text LLM Multimodal Agent).
 Path-based target routing + decision-engine attention layer.
 """
 
+import asyncio
 import logging
+import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import AsyncGenerator
 
+import httpx
 from fastapi import FastAPI, Request
 
+from backend.src.cache_store import cache
 from backend.src.config import ProxyConfig
 from backend.src.decision_engine import DecisionEngine
-from backend.src.error_handler import check_config, register_error_handlers
+from backend.src.error_handler import (
+    InvalidRequestError,
+    PayloadTooLargeError,
+    TargetModelTimeoutError,
+    TargetModelUnavailableError,
+    check_config,
+    register_error_handlers,
+)
 from backend.src.format_detector import detect_format, parse_anthropic_request, parse_openai_request
 from backend.src.image_extractor import (
-    cache_entries,
-    cache_get,
-    cache_set,
     extract_file_metadata,
     extract_images,
-    has_images,
     image_hash,
 )
 from backend.src.logging_config import setup_logging
 from backend.src.middleware.auth import APIKeyMiddleware
-from backend.src.models import TargetModelConfig
+from backend.src.models import ImageBlock, ProxyRequest, TargetModelConfig
 from backend.src.request_rewriter import RequestRewriter
 from backend.src.response_handler import ResponseHandler
 from backend.src.target_client import TargetModelClient
@@ -62,7 +71,17 @@ def _get_target_client() -> TargetModelClient:
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="TLMA - Text LLM Multimodal Agent")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    yield
+    if _target_client is not None:
+        await _target_client.close()
+    await vision_client.close()
+    await decision_engine.close()
+
+
+app = FastAPI(title="TLMA - Text LLM Multimodal Agent", lifespan=_lifespan)
 app.add_middleware(APIKeyMiddleware, api_key=config.proxy_api_key)
 register_error_handlers(app)
 check_config(config)
@@ -74,7 +93,7 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# API
+# API — HTTP layer (thin, extracts data from Request)
 # ---------------------------------------------------------------------------
 
 
@@ -88,15 +107,7 @@ async def openai_chat_completions(request: Request, target: str):
     return await _run_pipeline(request, target)
 
 
-# ---------------------------------------------------------------------------
-# Pipeline
-# ---------------------------------------------------------------------------
-
-
 async def _run_pipeline(request: Request, target: str):
-    from backend.src.error_handler import InvalidRequestError, PayloadTooLargeError, TargetModelTimeoutError, TargetModelUnavailableError
-    import httpx
-
     # --- Content-Length ---
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -112,131 +123,168 @@ async def _run_pipeline(request: Request, target: str):
     except Exception:
         raise InvalidRequestError("Failed to parse JSON request body")
 
+    # --- Target config ---
+    target_base_url = _resolve_target_base_url(request, target)
+    target_api_key = getattr(request.state, "target_api_key", "")
+    target_config = TargetModelConfig(
+        model_id=body.get("model", ""),
+        api_base=target_base_url,
+        api_key=target_api_key,
+    )
+
+    return await _execute_pipeline(
+        body=body,
+        path=str(request.url.path),
+        target_config=target_config,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline — business logic (testable, no HTTP dependency)
+# ---------------------------------------------------------------------------
+
+
+async def _execute_pipeline(body: dict, path: str, target_config: TargetModelConfig):
     messages = body.get("messages")
     if not messages or (isinstance(messages, list) and len(messages) == 0):
         raise InvalidRequestError("messages field is required and must be non-empty")
 
-    # --- Target config from path + headers ---
-    scheme = "https"
-    t = target
-    if t.startswith("http."):
-        scheme = "http"
-        t = t[5:]
-    target_api_key = getattr(request.state, "target_api_key", "")
-    target_config = TargetModelConfig(
-        model_id=body.get("model", ""),
-        api_base=f"{scheme}://{t}",
-        api_key=target_api_key,
-    )
-    logger.info("Target: %s://%s", scheme, t)
-
     # --- Stage 1: Format detect ---
-    fmt = detect_format(
-        "/v1/messages" if "v1/messages" in str(request.url.path) else "/v1/chat/completions",
-        body,
-    )
+    fmt = detect_format(path, body)
     proxy_request = (
         parse_anthropic_request(body) if fmt == "anthropic"
         else parse_openai_request(body)
     )
 
-    # --- Stage 2: Decision engine → image attention routing ---
+    # --- Stage 2: Image check + short-circuit ---
     new_images = await extract_images(proxy_request, latest_only=True)
 
+    if not new_images and not cache.entries():
+        logger.info("Pure-text fast path (no images, no cache)")
+        return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
+
+    # --- Stage 3: Decision engine (only when images or cache exist) ---
+    user_msgs = _extract_user_messages(proxy_request, last_n=5)
+    cached = cache.entries()
+
+    decision = await decision_engine.decide(user_msgs, cached, new_image_count=len(new_images))
+    logger.info("Decision: mode=%s hashes=%s focus=%.80s reasoning=%s",
+                decision.mode, decision.image_hashes, decision.focus_prompt, decision.reasoning)
+
     if new_images:
-        # PATH A / B: fresh images in latest message — direct vision
         logger.info("New images in latest message: %d", len(new_images))
-
-        vision_results: list = []
-        for img in new_images:
-            h = image_hash(img)
-            cached = cache_get(h) if h else None
-            if cached:
-                vision_results.append((img, cached))
-                logger.info("Image %s: cache hit", h[:12] if h else "?")
-            else:
-                desc = await vision_client.recognize(img)
-                vision_results.append((img, desc))
-                if h:
-                    fname, pos = extract_file_metadata(proxy_request, img)
-                    cache_set(h, desc, "通用描述", fname, pos)
-                logger.info("Image %s: vision done", h[:12] if h else "?")
-
+        vision_results = await _vision_and_cache(new_images, decision, proxy_request)
         proxy_request = rewriter.rewrite(proxy_request, vision_results)
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
-    # No new images — check decision engine for historical re-vision
-    cached = cache_entries()
-    if not cached:
-        logger.info("Pure-text fast path (no cache)")
-        return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
-
-    # --- Build decision input ---
-    user_msgs = _extract_user_messages(proxy_request, last_n=5)
-    last_reply = _extract_last_assistant_reply(proxy_request)
-
-    decision = await decision_engine.decide(user_msgs, cached, last_reply)
-    logger.info("Decision: hashes=%s mode=%s focus=%s", decision.image_hashes, decision.mode, decision.focus_prompt[:50])
-
+    # No new images — use decision result.
     if not decision.image_hashes:
         logger.info("Pure-text fast path (decision: no relevant images)")
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
-    # PATH D: extract historical images by hash
+    # Historical images: extract by hash
     all_images = await extract_images(proxy_request, latest_only=False)
-    target_images: list = []
-    seen_hashes: set[str] = set()
-    for img in all_images:
-        h = image_hash(img)
-        if h and h in decision.image_hashes and h not in seen_hashes:
-            seen_hashes.add(h)
-            target_images.append(img)
+    target_images, seen_hashes = _filter_images_by_hash(all_images, decision.image_hashes)
 
     if not target_images:
         logger.warning("Decision requested images not found in body")
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
-    logger.info("Re-vision: %d images, mode=%s, focus=%s",
-                len(target_images), decision.mode, decision.focus_prompt)
-
-    focus = decision.focus_prompt or "请描述这张图片的内容"
-
-    if decision.mode == "compare" and len(target_images) >= 2:
-        desc = await vision_client.recognize_compare(target_images, focus)
-        vision_results = [(img, desc) for img in target_images]
-        # Update cache for each image
-        for img in target_images:
-            h = image_hash(img)
-            if h:
-                fname, pos = extract_file_metadata(proxy_request, img)
-                cache_set(h, desc, focus, fname, pos)
-    else:
-        vision_results = []
-        for img in target_images:
-            h = image_hash(img)
-            cached_hit = cache_get(h, focus) if h else None
-            if cached_hit:
-                vision_results.append((img, cached_hit))
-                continue
-            desc = await vision_client.recognize(img)
-            vision_results.append((img, desc))
-            if h:
-                fname, pos = extract_file_metadata(proxy_request, img)
-                cache_set(h, desc, focus, fname, pos)
-
+    logger.info("[RE-VISION] %d images from history, mode=%s", len(target_images), decision.mode)
+    vision_results = await _vision_and_cache(target_images, decision, proxy_request)
     proxy_request = rewriter.rewrite(proxy_request, vision_results)
     return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
 
-async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
-    import httpx
-    from backend.src.error_handler import TargetModelTimeoutError, TargetModelUnavailableError
+# ---------------------------------------------------------------------------
+# Vision + cache helper (shared across new_images and historical branches)
+# ---------------------------------------------------------------------------
 
+
+async def _vision_and_cache(
+    images: list[ImageBlock],
+    decision,
+    proxy_request: ProxyRequest,
+) -> list[tuple[ImageBlock, str]]:
+    focus = decision.focus_prompt or "请描述这张图片的内容"
+
+    if decision.mode == "compare" and len(images) >= 2:
+        return await _vision_compare_locked(images, focus, proxy_request)
+
+    logger.info("[SINGLE] %d image(s) — individual vision calls", len(images))
+    results: list[tuple[ImageBlock, str]] = []
+    for img in images:
+        h = image_hash(img)
+        if not h:
+            desc = await vision_client.recognize(img, focus)
+            results.append((img, desc))
+            continue
+
+        cached_hit = cache.get(h, focus)
+        if cached_hit:
+            results.append((img, cached_hit))
+            logger.info("  [CACHE HIT] %s", h[:12])
+            continue
+
+        lock = cache.acquire_lock(h)
+        await lock.acquire()
+        try:
+            cached_hit = cache.get(h, focus)
+            if cached_hit:
+                results.append((img, cached_hit))
+                logger.info("  [CACHE HIT] %s (after lock)", h[:12])
+                continue
+            desc = await vision_client.recognize(img, focus)
+            logger.info("  [VISION OUTPUT] %.300s", desc)
+            fname, pos = extract_file_metadata(proxy_request, img)
+            cache.set(h, desc, focus, fname, pos, _make_label(desc))
+            results.append((img, desc))
+            logger.info("  [VISION OK] %s", h[:12])
+        finally:
+            cache.release_lock(h)
+    return results
+
+
+async def _vision_compare_locked(
+    images: list[ImageBlock],
+    focus: str,
+    proxy_request: ProxyRequest,
+) -> list[tuple[ImageBlock, str]]:
+    """Compare mode with per-hash locking — acquire all locks before calling vision."""
+    logger.info("[COMPARE] %d images in ONE vision call | focus=%s", len(images), focus[:100])
+
+    hashes = [image_hash(img) for img in images]
+    locks: list[tuple[str, asyncio.Lock]] = []
+    for h in sorted(h for h in hashes if h):
+        lock = cache.acquire_lock(h)
+        await lock.acquire()
+        locks.append((h, lock))
+
+    try:
+        desc = await vision_client.recognize_compare(images, focus)
+        logger.info("[VISION OUTPUT] %s", desc[:500])
+        for img in images:
+            h = image_hash(img)
+            if h:
+                fname, pos = extract_file_metadata(proxy_request, img)
+                cache.set(h, desc, focus, fname, pos, _make_label(desc))
+        return [(img, desc) for img in images]
+    finally:
+        for h, lock in locks:
+            cache.release_lock(h)
+
+
+# ---------------------------------------------------------------------------
+# Forwarding
+# ---------------------------------------------------------------------------
+
+
+async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
     client = _get_target_client()
     try:
         if stream:
             gen = client.forward_stream(body, target_config)
-            return await response_handler.handle_stream(gen, "anthropic")
+            return response_handler.handle_stream(gen, "anthropic")
         else:
             resp = await client.forward(body, target_config)
             return await response_handler.handle_non_stream(resp, "anthropic")
@@ -249,43 +297,70 @@ async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
 
 
 # ---------------------------------------------------------------------------
-# Decision engine helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-def _extract_user_messages(request: "ProxyRequest", last_n: int = 5) -> list[str]:
-    """Extract the last N user-written messages as plain text.
+def _resolve_target_base_url(request: Request, target: str) -> str:
+    """Resolve target API base URL from x-target-base-url header, or path routing.
 
-    Skips tool_result messages (system tool outputs, file contents) —
-    only returns messages the user actually typed.
+    Header-based routing (preferred)::
+        x-target-base-url: https://ark.cn-beijing.volces.com/api/coding
+
+    Path-based routing (fallback)::
+        POST /{host}/v1/messages  →  https://{host}
     """
+    header_url = request.headers.get("x-target-base-url")
+    if header_url:
+        return header_url.rstrip("/")
+
+    scheme = "https"
+    t = target
+    if t.startswith("http."):
+        scheme = "http"
+        t = t[5:]
+
+    logger.info("Target: %s://%s", scheme, t)
+    return f"{scheme}://{t}"
+
+
+def _filter_images_by_hash(
+    images: list[ImageBlock],
+    requested_hashes: list[str],
+) -> tuple[list[ImageBlock], set[str]]:
+    target: list[ImageBlock] = []
+    seen: set[str] = set()
+    for img in images:
+        h = image_hash(img)
+        if h and h in requested_hashes and h not in seen:
+            seen.add(h)
+            target.append(img)
+    return target, seen
+
+
+def _make_label(desc: str) -> str:
+    if not desc:
+        return ""
+    return desc.strip()[:40]
+
+
+_SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+
+
+def _extract_user_messages(request: ProxyRequest, last_n: int = 5) -> list[str]:
     from backend.src.models import TextBlock, ToolResultBlock
+
     result: list[str] = []
     for msg in request.messages:
         if msg.role != "user":
             continue
-        # Skip pure tool_result messages (system outputs, not user questions)
         if all(isinstance(b, ToolResultBlock) for b in msg.content):
             continue
         text = ""
         for block in msg.content:
             if isinstance(block, TextBlock):
                 text += block.text + " "
-        text = text.strip()
+        text = _SYSTEM_REMINDER_RE.sub("", text).strip()
         if text:
             result.append(text)
     return result[-last_n:]
-
-
-def _extract_last_assistant_reply(request: "ProxyRequest") -> str:
-    """Extract the last assistant message text."""
-    from backend.src.models import TextBlock
-    for msg in reversed(request.messages):
-        if msg.role != "assistant":
-            continue
-        parts: list[str] = []
-        for block in msg.content:
-            if isinstance(block, TextBlock):
-                parts.append(block.text)
-        return " ".join(parts)[:500]
-    return ""

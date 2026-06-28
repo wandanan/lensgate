@@ -26,11 +26,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 
 import httpx
 
 from backend.src.config import ProxyConfig
 from backend.src.models import ImageBlock
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -38,7 +41,23 @@ from backend.src.models import ImageBlock
 
 FALLBACK_TEXT: str = "[图片无法识别]"
 
-RECOGNIZE_PROMPT: str = "请用简洁的语言描述这张图片的内容，重点说明图中有什么信息。"
+DEFAULT_PROMPT: str = "请描述这张图片的内容。"
+
+_MAX_RETRIES = 5
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_retryable(status: int) -> bool:
+    """429 and 5xx are transient; 4xx (except 429) are not."""
+    return status == 429 or status >= 500
+
+
+def _build_prompt(focus: str) -> str:
+    """Return the vision prompt — default description, or user's focus if given."""
+    return focus or DEFAULT_PROMPT
 
 # ---------------------------------------------------------------------------
 # QwenVisionClient
@@ -61,29 +80,44 @@ class QwenVisionClient:
         self._base_url: str = config.vision_base_url
         self._model: str = config.vision_model
         self._timeout: int = config.vision_timeout
+        self._client: httpx.AsyncClient | None = None
+        self._semaphore = asyncio.Semaphore(20)  # max concurrent vision calls
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Lazily create a shared httpx.AsyncClient with connection pooling."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self._timeout),
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
+            )
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    async def recognize(self, image: ImageBlock) -> str:
+    async def recognize(self, image: ImageBlock, focus_prompt: str = "") -> str:
         """Recognise a single image and return a text description.
 
-        On any failure — non-200 status, timeout, JSON parse error, missing
-        image data — the method returns ``"[图片无法识别]"`` instead of raising
-        an exception.  This guarantees that a vision failure never blocks the
-        proxy pipeline.
-
-        On HTTP 429 (rate-limit): waits 1 s and retries once.  If the retry
-        also returns 429 (or any other error) the fallback text is returned.
+        When *focus_prompt* is given, it overrides the default description prompt.
+        Retries up to 5 times with exponential backoff on transient failures.
         """
-        # Guard: no image data to send.
         if image.image_data is None:
+            logger.warning("Vision: image_data is None")
             return FALLBACK_TEXT
 
         url = f"{self._base_url}/v1/chat/completions"
         b64 = base64.b64encode(image.image_data).decode("ascii")
         media_type = image.media_type or "image/png"
+        prompt = _build_prompt(focus_prompt)
+
+        logger.info("Vision request: model=%s size=%d media=%s focus=%.60s",
+                     self._model, len(image.image_data), media_type, prompt)
 
         payload = {
             "model": self._model,
@@ -97,37 +131,64 @@ class QwenVisionClient:
                                 "url": f"data:{media_type};base64,{b64}",
                             },
                         },
-                        {"type": "text", "text": RECOGNIZE_PROMPT},
+                        {"type": "text", "text": prompt},
                     ],
                 }
             ],
-            "max_tokens": 2000,
+            "max_tokens": 4096,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
-        # At most 2 attempts (initial + 1 retry on 429).
-        for attempt in range(2):
+        return await self._call_with_retry(url, payload, headers, "single")
+
+    async def _call_with_retry(self, url: str, payload: dict, headers: dict, label: str) -> str:
+        """Post to vision API with exponential backoff retry (5 retries max).
+
+        Retryable: 429, 5xx, TimeoutException, RequestError
+        Non-retryable: 4xx (except 429), JSONDecodeError
+        """
+        last_error = ""
+        client = self._get_client()
+        for attempt in range(_MAX_RETRIES + 1):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                async with self._semaphore:
                     resp = await client.post(url, json=payload, headers=headers)
 
                 if resp.status_code == 200:
                     data = resp.json()
                     return data["choices"][0]["message"]["content"]
 
-                # 429 rate-limit → retry after 1 s (only on the first attempt).
-                if resp.status_code == 429 and attempt == 0:
-                    await asyncio.sleep(1.0)
-                    continue
+                if not _is_retryable(resp.status_code):
+                    logger.warning("Vision [%s]: HTTP %d (non-retryable) — %s",
+                                   label, resp.status_code, resp.text[:300])
+                    return FALLBACK_TEXT
 
+                last_error = f"HTTP {resp.status_code}"
+                logger.warning("Vision [%s]: %s (attempt %d/%d)",
+                               label, last_error, attempt + 1, _MAX_RETRIES + 1)
+
+            except httpx.TimeoutException:
+                last_error = f"timeout ({timeout}s)"
+                logger.warning("Vision [%s]: %s (attempt %d/%d)",
+                               label, last_error, attempt + 1, _MAX_RETRIES + 1)
+            except httpx.RequestError as e:
+                last_error = f"request error: {e}"
+                logger.warning("Vision [%s]: %s (attempt %d/%d)",
+                               label, last_error, attempt + 1, _MAX_RETRIES + 1)
+            except json.JSONDecodeError as e:
+                logger.warning("Vision [%s]: JSON parse error — %s", label, e)
                 return FALLBACK_TEXT
 
-            except (httpx.TimeoutException, httpx.RequestError, json.JSONDecodeError):
-                return FALLBACK_TEXT
+            if attempt < _MAX_RETRIES:
+                wait = 2 ** attempt  # 1, 2, 4, 8, 16 seconds
+                logger.info("Vision [%s]: retrying in %ds...", label, wait)
+                await asyncio.sleep(wait)
 
+        logger.warning("Vision [%s]: exhausted %d retries, last error: %s",
+                       label, _MAX_RETRIES, last_error)
         return FALLBACK_TEXT
 
     async def recognize_batch(self, images: list[ImageBlock]) -> list[str]:
@@ -137,7 +198,7 @@ class QwenVisionClient:
         image failure never blocks the remaining images.  Any Exception
         captured by gather is converted to ``"[图片无法识别]"``.
         """
-        tasks = [self.recognize(img) for img in images]
+        tasks = [self.recognize(img, "") for img in images]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         out: list[str] = []
@@ -151,12 +212,9 @@ class QwenVisionClient:
     async def recognize_compare(
         self, images: list[ImageBlock], focus_prompt: str
     ) -> str:
-        """Compare multiple images in a single vision call.
+        """Compare multiple images in a single vision call with cross-image attention.
 
-        All images are placed in one messages[0].content array so the
-        vision model can attend across images — like native multimodal.
-
-        Returns FALLBACK_TEXT on any failure.
+        Retries up to 5 times with exponential backoff on transient failures.
         """
         if not images:
             return FALLBACK_TEXT
@@ -177,24 +235,16 @@ class QwenVisionClient:
         if not content:
             return FALLBACK_TEXT
 
-        content.append({"type": "text", "text": focus_prompt})
+        content.append({"type": "text", "text": _build_prompt(focus_prompt)})
 
         payload = {
             "model": self._model,
             "messages": [{"role": "user", "content": content}],
-            "max_tokens": 2000,
+            "max_tokens": 4096,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout * 2) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            return FALLBACK_TEXT
-        except (httpx.TimeoutException, httpx.RequestError, json.JSONDecodeError):
-            return FALLBACK_TEXT
+        return await self._call_with_retry(url, payload, headers, "compare")

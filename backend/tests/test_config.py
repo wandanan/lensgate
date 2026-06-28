@@ -80,11 +80,11 @@ def test_validate_required_raises_on_missing_keys(monkeypatch):
     """validate_required() raises ValueError when VISION_API_KEY
     and TARGET_DEFAULT_API_KEY are not set."""
     monkeypatch.delenv("VISION_API_KEY", raising=False)
-    monkeypatch.delenv("TARGET_DEFAULT_API_KEY", raising=False)
 
     from backend.src.config import ProxyConfig
 
     config = ProxyConfig()
+    config.vision_api_key = ""
     with pytest.raises((RuntimeError, ValueError)):
         config.validate_required()
 

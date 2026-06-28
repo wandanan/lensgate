@@ -61,64 +61,25 @@ class ResponseHandler:
             headers={"Content-Type": "application/json"},
         )
 
-    async def handle_stream(
+    def handle_stream(
         self,
-        target_stream_generator: AsyncGenerator[str, None],
+        generator: AsyncGenerator[str, None],
         source_format: str,
     ) -> StreamingResponse:
-        """Handle a streaming (SSE) target model response.
+        """Handle a streaming (SSE) response.
 
-        Wraps the async generator from ``TargetClient.forward_stream()``
-        in a ``fastapi.responses.StreamingResponse`` with
-        ``media_type="text/event-stream"``.
-
-        SSE events (message_start, content_block_delta, message_stop,
-        etc.) are forwarded unchanged — the generator is yielded
-        line-by-line.
-
-        Parameters:
-            target_stream_generator: Async generator yielding SSE lines
-                                     (each line starts with ``"data: "``).
-            source_format:           The original API format
-                                     (``"anthropic"`` or ``"openai"``).
-
-        Returns:
-            A ``StreamingResponse`` that streams SSE events to the client.
+        The generator yields SSE lines (each ending with ``\\n``,
+        consecutive lines form ``\\n\\n`` separators).  Status events
+        from the pipeline are mixed in by the caller.
         """
         return StreamingResponse(
-            content=self._sse_generator(target_stream_generator),
+            content=generator,
             media_type="text/event-stream",
         )
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _sse_generator(
-        self, source_generator: AsyncGenerator[str, None]
-    ) -> AsyncGenerator[str, None]:
-        """Yield each line from the source SSE generator unchanged.
-
-        Each line is already in SSE format (``data: ...``) as produced
-        by ``TargetClient.forward_stream()``.  Empty lines have already
-        been filtered upstream.
-
-        Error handling (C07 — §7.1):
-        - On upstream stream interruption: sends an ``[ERROR]`` SSE event
-          before closing the connection (SYS-004).
-        - On client disconnect (``asyncio.CancelledError``): the upstream
-          generator's ``aclose()`` is invoked automatically by the async
-          framework, releasing the httpx stream (SYS-001).
-        """
-        try:
-            async for line in source_generator:
-                yield line  # line already ends with \n, pairs form \n\n
-        except asyncio.CancelledError:
-            logger.info("SSE stream cancelled (client disconnect)")
-        except Exception:
-            logger.exception("Upstream SSE stream interrupted")
-            error_event = json.dumps(
-                {"type": "error", "error": {"type": "stream_error", "message": "Upstream stream interrupted"}},
-                ensure_ascii=False,
-            )
-            yield f"data: {error_event}\n\n"
+    @staticmethod
+    def status_event(message: str) -> str:
+        """Build a progress status SSE event for the pipeline."""
+        return (
+            f"event: status\ndata: {json.dumps({'type': 'processing', 'message': message}, ensure_ascii=False)}\n\n"
+        )

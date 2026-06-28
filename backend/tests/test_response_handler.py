@@ -146,7 +146,7 @@ async def test_handle_stream_returns_streaming_response():
     sse_lines = ["data: chunk1", "data: chunk2", "data: [DONE]"]
     gen = _make_sse_generator(sse_lines)
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
 
     from fastapi.responses import StreamingResponse
 
@@ -171,7 +171,7 @@ async def test_streaming_response_forwards_sse_events():
     sse_lines = ["data: chunk1", "data: chunk2", "data: [DONE]"]
     gen = _make_sse_generator(sse_lines)
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
 
     chunks = await _consume_stream(result)
     assert chunks == sse_lines
@@ -205,7 +205,7 @@ async def test_anthropic_sse_event_types_preserved():
     ]
     gen = _make_sse_generator(sse_lines)
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
     chunks = await _consume_stream(result)
 
     expected_types = [
@@ -269,7 +269,7 @@ async def test_stream_content_type_event_stream():
     handler = ResponseHandler()
     gen = _make_sse_generator(["data: hello"])
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
 
     assert result.media_type == "text/event-stream"
 
@@ -346,7 +346,7 @@ async def test_sys_stream_each_chunk_delta_and_stop():
     ]
     gen = _make_sse_generator(sse_lines)
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
     chunks = await _consume_stream(result)
 
     types = []
@@ -381,7 +381,7 @@ async def test_sys_identify_phase_no_sse_events():
     # During identify phase the generator yields nothing (empty).
     gen = _make_sse_generator([])
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
     chunks = await _consume_stream(result)
 
     # No SSE events at all during identify.
@@ -417,7 +417,7 @@ async def test_sys_target_inference_token_by_token_forwarding():
     sse_lines.append("data: {\"type\": \"message_stop\"}")
     gen = _make_sse_generator(sse_lines)
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
     chunks = await _consume_stream(result)
 
     # Each chunk is a separate SSE event — tokens arrive individually.
@@ -486,7 +486,7 @@ async def test_handle_stream_empty_generator():
     handler = ResponseHandler()
     gen = _make_sse_generator([])
 
-    result = await handler.handle_stream(gen, "anthropic")
+    result = handler.handle_stream(gen, "anthropic")
     chunks = await _consume_stream(result)
 
     assert chunks == []
@@ -506,7 +506,7 @@ async def test_response_handler_is_stateless():
 
     # Second call — streaming.
     gen = _make_sse_generator(["data: ping"])
-    r2 = await handler.handle_stream(gen, "anthropic")
+    r2 = handler.handle_stream(gen, "anthropic")
     assert r2.media_type == "text/event-stream"
 
     # Third call — non-streaming again (no side effects from prior calls).

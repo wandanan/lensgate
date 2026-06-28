@@ -14,6 +14,7 @@ import re
 
 import httpx
 
+from backend.src.cache_store import cache
 from backend.src.models import ImageBlock, ProxyRequest, ToolResultBlock
 
 # ---------------------------------------------------------------------------
@@ -25,10 +26,6 @@ SUPPORTED_MEDIA_TYPES: set[str] = {"image/png", "image/jpeg", "image/webp", "ima
 _DATA_URI_RE = re.compile(r"^data:(image/[\w.+-]+);base64,(.+)$", re.ASCII)
 
 _DEFAULT_DOWNLOAD_TIMEOUT = 30.0
-
-# In-memory cache: hash → {file_name, position, focus_results: {focus_prompt: description}}
-_vision_cache: dict[str, dict] = {}
-_image_counter: int = 0  # Global counter for position numbering
 
 
 # ---------------------------------------------------------------------------
@@ -78,50 +75,18 @@ def image_hash(block: ImageBlock) -> str:
     return ""
 
 
-def cache_get(h: str, focus: str = "通用描述") -> str | None:
-    """Return cached vision description for (hash, focus), or None."""
-    entry = _vision_cache.get(h)
-    if entry is None:
-        return None
-    return entry.get("focus_results", {}).get(focus)
+def cache_get(h: str, focus: str = "") -> str | None:
+    return cache.get(h, focus)
 
 
 def cache_set(h: str, description: str, focus: str = "通用描述",
-              file_name: str = "", position: int = 0) -> None:
-    """Store vision description + metadata in cache."""
-    if h not in _vision_cache:
-        _vision_cache[h] = {
-            "file_name": file_name,
-            "position": position,
-            "focus_results": {},
-        }
-    entry = _vision_cache[h]
-    entry["focus_results"][focus] = description
-    if file_name and not entry.get("file_name"):
-        entry["file_name"] = file_name
-    if position and not entry.get("position"):
-        entry["position"] = position
+              file_name: str = "", position: int = 0,
+              label: str = "") -> None:
+    cache.set(h, description, focus, file_name, position, label)
 
 
 def cache_entries() -> list[dict[str, str]]:
-    """Return all cache entries for the decision engine.
-
-    Each entry: {hash, file_name, position, summary} where summary is the
-    most recent generic description.
-    """
-    result: list[dict[str, str]] = []
-    for h, entry in _vision_cache.items():
-        focus_results = entry.get("focus_results", {})
-        summary = focus_results.get("通用描述", "")
-        if not summary and focus_results:
-            summary = next(iter(focus_results.values()))
-        result.append({
-            "hash": h,
-            "file_name": entry.get("file_name", ""),
-            "position": str(entry.get("position", "")),
-            "summary": summary,
-        })
-    return result
+    return cache.entries()
 
 
 def extract_file_metadata(request: ProxyRequest, img: ImageBlock) -> tuple[str, int]:
@@ -130,16 +95,11 @@ def extract_file_metadata(request: ProxyRequest, img: ImageBlock) -> tuple[str, 
     Looks for a tool_use: Read block preceding the tool_result that contains
     this image, and reads input.file_path.
     """
-    global _image_counter
     file_name = ""
-    pos = 0
 
-    # Find the tool_use that triggered this image read.
     msg_idx = img.message_index
     parent_idx = img.parent_block_index
 
-    # The image is inside tool_result at messages[msg_idx].content[parent_idx].
-    # The corresponding tool_use is typically the previous assistant message.
     if parent_idx is not None and msg_idx > 0:
         prev_msg = request.messages[msg_idx - 1]
         for block in prev_msg.content:
@@ -149,11 +109,7 @@ def extract_file_metadata(request: ProxyRequest, img: ImageBlock) -> tuple[str, 
                 if file_path:
                     file_name = file_path.replace("\\", "/").rsplit("/", 1)[-1]
 
-    # Assign position.
-    if file_name or img.image_data:
-        _image_counter += 1
-        pos = _image_counter
-
+    pos = cache.next_position() if (file_name or img.image_data) else 0
     return file_name, pos
 
 

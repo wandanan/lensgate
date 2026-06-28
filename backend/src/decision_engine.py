@@ -1,28 +1,40 @@
 """
 Decision Engine — lightweight intent recognition for image attention routing.
 
-Uses a fast text model (DeepSeek Chat) to decide:
-- Should we re-vision an image? (re_vision vs skip)
-- Which image(s)? (by hash)
+Uses a fast text model (DeepSeek Chat) with native tool-calling to decide:
+- Which image(s) to re-vision? (by SHA-256 hash)
 - What to focus on? (focus_prompt)
 - Is it a comparison? (mode: single vs compare)
 
-Input is bounded (~500 tokens) to keep latency <0.5s regardless of
-conversation length.
+Tool-calling guarantees valid JSON output (no parsing heuristics needed).
+Every decision is logged to ``valuation/valuation.jsonl`` for quality analysis.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
+_VALUATION_PATH = Path("valuation/valuation.jsonl")
+
+# SHA-256 hex digest: 64 lowercase hex characters.
+_HASH_RE = re.compile(r"^[a-f0-9]{64}$")
+
+# focus_prompt limits.
+_MAX_FOCUS_LEN = 200
+_MIN_FOCUS_LEN = 4
+
+
 # ---------------------------------------------------------------------------
-# Types
+# Decision result
 # ---------------------------------------------------------------------------
 
 
@@ -40,7 +52,7 @@ class DecisionResult:
     ):
         self.image_hashes = image_hashes or []
         self.focus_prompt = focus_prompt
-        self.mode = mode  # "single" | "compare"
+        self.mode = mode
         self.reasoning = reasoning
 
     def __repr__(self) -> str:
@@ -56,20 +68,13 @@ class DecisionResult:
 
 
 class DecisionEngine:
-    """Lightweight intent recognition for image attention routing.
-
-    Uses a fast text model to decide whether and how to re-vision images.
-
-    Parameters:
-        api_key: API key for the decision model provider.
-        base_url: Base URL for the chat completions endpoint.
-        model: Model identifier (default: "deepseek-chat").
-    """
+    """Lightweight intent recognition for image attention routing."""
 
     SYSTEM_PROMPT = (
         "你是图片注意力路由器。根据用户消息和缓存图片摘要,"
-        "调用 route_decision 函数输出路由决策。"
-        "禁止直接回答用户问题。"
+        "调用 route_decision 函数输出路由决策。禁止直接回答用户问题。\n"
+        "缓存图片带有位置标签(第1张/第2张)和文件名,"
+        "用户说'图一''第一张'时严格匹配位置标签。"
     )
 
     TOOL_DEFINITION = {
@@ -83,20 +88,20 @@ class DecisionEngine:
                     "image_hashes": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "需要重识的图片SHA-256哈希列表, 无关时为空数组"
+                        "description": "需要重识的图片SHA-256哈希列表, 无关时为空数组",
                     },
                     "focus_prompt": {
                         "type": "string",
-                        "description": "给视觉模型的查看指令(10-150字祈使句), 空字符串表示通用描述"
+                        "description": "给视觉模型的查看指令(10-150字祈使句), 空字符串表示通用描述",
                     },
                     "mode": {
                         "type": "string",
                         "enum": ["single", "compare"],
-                        "description": "单图识别还是多图对比"
+                        "description": "单图识别还是多图对比",
                     },
                     "reasoning": {
                         "type": "string",
-                        "description": "判断理由简述(≤50字)"
+                        "description": "判断理由简述(≤50字)",
                     },
                 },
                 "required": ["image_hashes", "focus_prompt", "mode", "reasoning"],
@@ -115,6 +120,20 @@ class DecisionEngine:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self._timeout),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            )
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -124,89 +143,133 @@ class DecisionEngine:
         self,
         user_messages: list[str],
         cached_images: list[dict[str, str]],
-        last_assistant_reply: str = "",
+        new_image_count: int = 0,
         max_retries: int = 2,
     ) -> DecisionResult:
         """Analyse user intent and return a routing decision.
 
-        Invalid outputs are retried with an error hint.  After *max_retries*
-        failures the engine returns an empty decision (skip).
-
-        Args:
-            user_messages: Last N user messages (newest last).
-            cached_images: List of {hash, file_name, summary} dicts.
-            last_assistant_reply: Most recent assistant response.
-            max_retries: Maximum retry attempts on malformed output.
-
-        Returns:
-            DecisionResult with target hashes, focus prompt, etc.
+        *new_image_count* tells the engine how many uncached images are in
+        the latest message, so it can recommend compare mode even without
+        cached entries.
         """
-        prompt = self._build_prompt(user_messages, cached_images, last_assistant_reply)
+        prompt = self._build_prompt(user_messages, cached_images, new_image_count)
         last_error = ""
+        raw_output = ""
 
         for attempt in range(max_retries + 1):
             try:
-                # On retry, append the previous error so the model can correct.
                 full_prompt = prompt
                 if attempt > 0 and last_error:
                     full_prompt = (
                         f"上次输出格式错误: {last_error}\n"
-                        f"请严格按 JSON 格式重新输出。\n\n"
+                        f"请严格按工具调用格式重新输出。\n\n"
                         f"{prompt}"
                     )
 
-                raw = await self._call_model(full_prompt)
-                result = self._parse(raw)
-                # Validation passed — return immediately.
-                logger.debug("Decision OK (attempt %d): %s", attempt + 1, result)
+                raw_output = await self._call_model(full_prompt)
+                result = self._parse(raw_output)
+
+                logger.info(
+                    "Decision OK (attempt %d): hashes=%s mode=%s focus=%s",
+                    attempt + 1, result.image_hashes, result.mode,
+                    result.focus_prompt[:80],
+                )
+
+                _write_valuation({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "attempt": attempt + 1,
+                    "input": {
+                        "user_messages": user_messages,
+                        "cached_images": cached_images,
+                        "new_image_count": new_image_count,
+                    },
+                    "output": {
+                        "raw": raw_output,
+                        "parsed": {
+                            "image_hashes": result.image_hashes,
+                            "focus_prompt": result.focus_prompt,
+                            "mode": result.mode,
+                            "reasoning": result.reasoning,
+                        },
+                    },
+                    "status": "ok",
+                })
+
                 return result
 
             except _DecisionValidationError as exc:
                 last_error = str(exc)
-                logger.warning("Decision validation failed (attempt %d/%d): %s",
-                               attempt + 1, max_retries + 1, exc)
+                logger.warning(
+                    "Decision validation failed (attempt %d/%d): %s",
+                    attempt + 1, max_retries + 1, exc,
+                )
 
             except Exception as exc:
-                # Network / API error — retryable.
                 last_error = str(exc)
-                logger.warning("Decision call failed (attempt %d/%d): %s",
-                               attempt + 1, max_retries + 1, exc)
+                logger.warning(
+                    "Decision call failed (attempt %d/%d): %s",
+                    attempt + 1, max_retries + 1, exc,
+                )
 
         # All retries exhausted.
         logger.warning("Decision engine exhausted retries, defaulting to skip")
+        _write_valuation({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "attempts": max_retries + 1,
+            "input": {
+                "user_messages": user_messages,
+                "cached_images": cached_images,
+            },
+            "output": {"last_raw": raw_output, "last_error": last_error},
+            "status": "failed",
+        })
         return DecisionResult(reasoning=f"retries exhausted: {last_error}")
 
     # ------------------------------------------------------------------
-    # Internal
+    # Internal: prompt builder
     # ------------------------------------------------------------------
 
     def _build_prompt(
         self,
         user_messages: list[str],
         cached_images: list[dict[str, str]],
-        last_assistant_reply: str,
+        new_image_count: int = 0,
     ) -> str:
         lines: list[str] = []
 
-        lines.append("用户历史消息 (最新在最后):")
+        if new_image_count > 0:
+            lines.append(f"注意: 最新消息包含 {new_image_count} 张新图片(尚未缓存)。")
+
+        lines.append("用户消息 (最新在最后):")
         for i, msg in enumerate(user_messages, 1):
             lines.append(f"  {i}. {msg}")
 
         if cached_images:
             lines.append("\n已缓存图片:")
             for img in cached_images:
+                pos = img.get("position_label", "")
+                fname = img.get("file_name", "?")
+                label = img.get("label", "")
+                tag_parts = []
+                if pos:
+                    tag_parts.append(pos)
+                tag_parts.append(f"file={fname}")
+                if label:
+                    tag_parts.append(f"[{label}]")
+                tag = " ".join(tag_parts)
                 lines.append(
-                    f"  [hash={img['hash']} file={img.get('file_name','?')}] "
-                    f"{img.get('summary','')[:120]}"
+                    f"  [{tag} hash={img['hash']}] "
+                    f"{img.get('summary', '')[:120]}"
                 )
         else:
             lines.append("\n已缓存图片: (无)")
 
-        if last_assistant_reply:
-            lines.append(f"\n最近 assistant 回复: {last_assistant_reply[:200]}")
-
-        lines.append("\n请输出路由决策 JSON。")
+        lines.append("\n请调用 route_decision 函数。")
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Internal: tool-calling API call
+    # ------------------------------------------------------------------
 
     async def _call_model(self, prompt: str) -> str:
         payload = {
@@ -229,21 +292,23 @@ class DecisionEngine:
             "Content-Type": "application/json",
         }
         url = f"{self._base_url}/chat/completions"
+        client = self._get_client()
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
 
-            # Extract tool_call arguments — guaranteed valid JSON by the API.
-            tool_calls = data["choices"][0]["message"].get("tool_calls", [])
-            if not tool_calls:
-                raise _DecisionValidationError("Model did not call route_decision tool")
-            return tool_calls[0]["function"]["arguments"]
+        tool_calls = data["choices"][0]["message"].get("tool_calls", [])
+        if not tool_calls:
+            raise _DecisionValidationError("Model did not call route_decision tool")
+        return tool_calls[0]["function"]["arguments"]
+
+    # ------------------------------------------------------------------
+    # Internal: parse + validate
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse(raw: str) -> DecisionResult:
-        # Tool-calling guarantees valid JSON — just decode.
         try:
             obj: dict[str, Any] = json.loads(raw)
         except json.JSONDecodeError as e:
@@ -255,28 +320,25 @@ class DecisionEngine:
         hashes = obj.get("image_hashes", [])
         if not isinstance(hashes, list):
             raise _DecisionValidationError("image_hashes must be an array")
-        for h in hashes:
-            if not isinstance(h, str):
-                raise _DecisionValidationError(f"image_hashes contains non-string: {h!r}")
+
+        if hashes:
+            _validate_hashes(hashes)
+
+        fp = obj.get("focus_prompt", "")
+        if not isinstance(fp, str):
+            raise _DecisionValidationError("focus_prompt must be a string")
+        fp_stripped = fp.strip()
+        if fp_stripped and hashes:
+            _validate_focus(fp_stripped)
+        fp = fp_stripped[:500]
 
         mode = obj.get("mode", "single")
         if mode not in ("single", "compare"):
             raise _DecisionValidationError(f"mode must be 'single' or 'compare', got: {mode!r}")
 
-        fp = obj.get("focus_prompt", "")
-        if not isinstance(fp, str):
-            raise _DecisionValidationError("focus_prompt must be a string")
-
         reasoning = obj.get("reasoning", "")
         if not isinstance(reasoning, str):
             reasoning = str(reasoning)
-
-        # --- Field-level validation (no heuristics, just format contracts) ---
-        if hashes:
-            _validate_hashes(hashes)
-        if fp:
-            _validate_focus(fp)
-        fp = fp.strip()[:500]
 
         return DecisionResult(
             image_hashes=hashes,
@@ -290,37 +352,18 @@ class DecisionEngine:
 # Field-level validation
 # ---------------------------------------------------------------------------
 
-import re
-
-# SHA-256 hex digest: 64 lowercase hex characters.
-_HASH_RE = re.compile(r"^[a-f0-9]{64}$")
-
-# focus_prompt limits: must be short, an instruction (not an answer).
-_MAX_FOCUS_LEN = 200
-_MIN_FOCUS_LEN = 4  # shorter than this is likely garbage, not an instruction
-
 
 def _validate_hashes(hashes: list) -> None:
-    """Every entry must be a 64-char hex string (SHA-256)."""
     for h in hashes:
         if not isinstance(h, str):
             raise _DecisionValidationError(f"image_hashes element must be string, got {type(h).__name__}")
         if not _HASH_RE.match(h):
             raise _DecisionValidationError(
-                f"image_hashes element must be a 64-char hex SHA-256 hash, got: {h[:60]}..."
+                f"image_hashes element must be 64-char hex SHA-256, got: {h[:60]}..."
             )
 
 
 def _validate_focus(fp: str) -> None:
-    """focus_prompt must be a short routing instruction, not an answer.
-
-    Answers tend to be long and descriptive; instructions are short and imperative.
-    """
-    if not isinstance(fp, str):
-        raise _DecisionValidationError("focus_prompt must be a string")
-    fp = fp.strip()
-    if not fp:
-        return  # empty is allowed (no specific focus)
     if len(fp) < _MIN_FOCUS_LEN:
         raise _DecisionValidationError(
             f"focus_prompt too short ({len(fp)} < {_MIN_FOCUS_LEN}), not a valid instruction"
@@ -332,6 +375,26 @@ def _validate_focus(fp: str) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Validation errors
+# ---------------------------------------------------------------------------
+
+
 class _DecisionValidationError(ValueError):
     """Raised when the model output fails schema validation."""
     pass
+
+
+# ---------------------------------------------------------------------------
+# Valuation audit log
+# ---------------------------------------------------------------------------
+
+
+def _write_valuation(record: dict) -> None:
+    """Append a decision record to the valuation JSONL file."""
+    try:
+        _VALUATION_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_VALUATION_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        logger.warning("Failed to write valuation record", exc_info=True)
