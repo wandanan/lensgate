@@ -122,60 +122,107 @@ Attention 计算: 每个 token 和所有 token 计算相似度, 图像 token 天
 | GLM 4 Flash | <0.3s | ~0 | 中 | 备选 |
 | kimi-k2.5 | ~1s | 低 | 强 | 过重 |
 
-### 3.2 输入结构
+### 3.2 输入结构 (已完成)
+
+仅提取用户手写消息, 过滤 tool_result (工具输出/文件内容), 最近 5 条。
 
 ```json
 {
   "role": "system",
-  "content": "你是意图识别决策器。分析用户消息, 判断是否需要重新识图。输出 JSON。",
+  "content": "你是图片注意力路由器。根据用户消息和缓存图片摘要, 调用 route_decision 函数。禁止直接回答。",
 
   "role": "user",
   "content": "
-    用户历史消息 (最近5条):
+    用户历史消息 (最近5条, 已过滤工具输出):
     1. {user_msg_1}
-    2. {user_msg_2}
-    3. {user_msg_3}
-    4. {user_msg_4}
+    ...
     5. {user_msg_5}  ← 最新
 
     已缓存图片:
-    [图#1 hash=abc123 file=image_123.png] {summary_1}
-    [图#2 hash=def456 file=screenshot.png] {summary_2}
+    [hash=abc123 file=image_123.png] {summary}
+    ...
+    最近 assistant 回复: {last_reply}
 
-    最近对话:
-    assistant: {last_assistant_reply}
-
-    请输出 JSON 决策。"
+    请调用 route_decision 函数。"
 }
 ```
 
-用户历史消息不限于最后一条 — 多条消息帮助决策模型理解对话脉络, 判断用户是追问、切换话题还是新问题。
+### 3.3 工具调用输出 (已完成)
 
-### 3.3 输出结构
+使用 DeepSeek Chat 原生工具调用 (tool_choice="required"), API 层保证 JSON 合法性。
 
 ```json
+// API 请求参数
 {
-  "action": "re_vision | skip",
-  "image_hashes": ["abc123"],
-  "focus_prompt": "请重点查看...",
-  "mode": "single | compare",
-  "reasoning": "用户追问...，缓存未覆盖此细节"
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "route_decision",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image_hashes": {
+            "type": "array", "items": {"type": "string"},
+            "description": "SHA-256哈希列表, 无关时=[]"
+          },
+          "focus_prompt": {
+            "type": "string",
+            "description": "视觉识别指令(10-150字祈使句)"
+          },
+          "mode": {
+            "type": "string", "enum": ["single","compare"]
+          },
+          "reasoning": {
+            "type": "string", "description": "判断理由(≤50字)"
+          }
+        },
+        "required": ["image_hashes","focus_prompt","mode","reasoning"]
+      }
+    }
+  }],
+  "tool_choice": {"type": "function", "function": {"name": "route_decision"}}
+}
+
+// API 响应 — arguments 永为合法 JSON
+{
+  "choices": [{"message": {
+    "tool_calls": [{"function": {
+      "name": "route_decision",
+      "arguments": "{\"image_hashes\":[\"abc123\"],\"focus_prompt\":\"...\",\"mode\":\"single\",\"reasoning\":\"...\"}"
+    }}]
+  }}]
 }
 ```
 
-### 3.4 决策规则
+### 3.4 字段级校验 + 重试 (已完成)
+
+不依赖关键词规则 — 按字段约定严格校验, 不合法 → 带错误原因重试。
 
 ```
-┌─────────────────┬──────────────────────────────────────────────┐
-│ 场景            │ 决策                                         │
-├─────────────────┼──────────────────────────────────────────────┤
-│ 新图首次         │ re_vision, focus="通用描述"                  │
-│ 追问细节(重读)    │ re_vision, focus=提取用户关注的细节          │
-│ 多图对比         │ re_vision, hashes=[图1,图2], mode=compare   │
-│ 无关问题         │ skip                                        │
-│ 已缓存+同问题    │ skip (完全命中)                              │
-│ 语义追问(未重读)  │ re_vision, hash=定位到历史图, focus=提取细节  │
-└─────────────────┴──────────────────────────────────────────────┘
+┌───────────────┬──────────────────────────────────────────┐
+│ 字段           │ 校验规则                                   │
+├───────────────┼──────────────────────────────────────────┤
+│ image_hashes[] │ 每项必须 /^[a-f0-9]{64}$/ (SHA-256)     │
+│ focus_prompt   │ 4-200 字, 超长/过短 → 拒绝                │
+│ mode           │ "single" | "compare"                     │
+│ reasoning      │ 不校验 (自由文本)                          │
+└───────────────┴──────────────────────────────────────────┘
+
+重试流程:
+  1. 调用模型 (tool_choice)
+  2. 解析 arguments → 字段校验
+  3. 校验失败 → 追加错误原因到 prompt → 重试 (最多2次)
+  4. 全部失败 → 降级 skip, 不阻断请求
+```
+
+### 3.5 为什么用工具调用而非 prompt 要 JSON
+
+```
+prompt 方式:                    工具调用方式:
+  模型可能输出 markdown 代码块      API 层强制 tool_calls 结构
+  可能夹杂回答/评论文本              arguments 永为合法 JSON
+  格式错误需正则提取                 无需解析、无需清洗
+  遵循率依赖 prompt 质量             模型经过 RLHF 工具调用训练
 ```
 
 ---
@@ -261,16 +308,18 @@ PATH D — 语义追问未重读 (决策模型自主提取)
 
 ---
 
-## 7. 实现计划
+## 7. 实现状态
 
-| 阶段 | 内容 | 依赖 |
+| 阶段 | 内容 | 状态 |
 |------|------|------|
-| 1 | 决策模型 client (DeepSeek Chat) | API key |
-| 2 | 最新消息扫描 + 缓存摘要构建 | 现有 image_extractor |
-| 3 | 决策模型集成 pipeline | 现有 app.py |
-| 4 | 历史图定位+提取 (PATH D) | 阶段 2 |
-| 5 | 多图对比模式 | 阶段 3 |
-| 6 | 测试 + 边界验证 | 阶段 4,5 |
+| 1 | 决策模型 client (DeepSeek Chat + 工具调用) | ✅ |
+| 2 | 最新消息扫描 + 缓存摘要构建 (过滤 tool_result) | ✅ |
+| 3 | 决策模型集成 pipeline (4 路径) | ✅ |
+| 4 | 历史图定位+提取 (PATH D, hash 去重) | ✅ |
+| 5 | 多图对比模式 (recognize_compare) | ✅ |
+| 6 | 字段级校验 + 工具调用强制 + 重试机制 | ✅ |
+| 7 | SSE 流式修复 (aiter_lines \n 保留) | ✅ |
+| 8 | PATH D 实测 + 决策引擎调优 | 🔄 进行中 |
 
 ---
 

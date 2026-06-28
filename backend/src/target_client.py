@@ -137,5 +137,4 @@ class TargetModelClient:
             timeout=httpx.Timeout(120.0),
         ) as response:
             async for line in response.aiter_lines():
-                if line:
-                    yield line
+                yield line + "\n"

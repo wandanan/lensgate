@@ -185,9 +185,11 @@ async def _run_pipeline(request: Request, target: str):
     # PATH D: extract historical images by hash
     all_images = await extract_images(proxy_request, latest_only=False)
     target_images: list = []
+    seen_hashes: set[str] = set()
     for img in all_images:
         h = image_hash(img)
-        if h and h in decision.image_hashes:
+        if h and h in decision.image_hashes and h not in seen_hashes:
+            seen_hashes.add(h)
             target_images.append(img)
 
     if not target_images:
@@ -252,11 +254,18 @@ async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
 
 
 def _extract_user_messages(request: "ProxyRequest", last_n: int = 5) -> list[str]:
-    """Extract the last N user messages as plain text."""
-    from backend.src.models import TextBlock
+    """Extract the last N user-written messages as plain text.
+
+    Skips tool_result messages (system tool outputs, file contents) —
+    only returns messages the user actually typed.
+    """
+    from backend.src.models import TextBlock, ToolResultBlock
     result: list[str] = []
     for msg in request.messages:
         if msg.role != "user":
+            continue
+        # Skip pure tool_result messages (system outputs, not user questions)
+        if all(isinstance(b, ToolResultBlock) for b in msg.content):
             continue
         text = ""
         for block in msg.content:

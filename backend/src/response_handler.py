@@ -112,10 +112,8 @@ class ResponseHandler:
         """
         try:
             async for line in source_generator:
-                yield line
+                yield line  # line already ends with \n, pairs form \n\n
         except asyncio.CancelledError:
-            # Client disconnected — the upstream httpx stream will be
-            # released by the generator's own async context manager.
             logger.info("SSE stream cancelled (client disconnect)")
         except Exception:
             logger.exception("Upstream SSE stream interrupted")
