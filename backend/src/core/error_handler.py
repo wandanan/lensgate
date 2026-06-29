@@ -163,16 +163,16 @@ def register_error_handlers(app: FastAPI) -> None:
 
 
 def check_config(config: ProxyConfig) -> None:
-    """Validate configuration at startup — .env existence + required keys.
+    """Validate required configuration keys at startup.
 
-    Calls ``config.ensure_env_file()`` then ``config.validate_required()``
-    and re-raises any ``ValueError`` as a ``RuntimeError`` so that the
-    process exits with a clear, non-zero exit code.
+    Calls ``config.validate_required()`` and re-raises any ``ValueError``
+    as a ``RuntimeError`` so that the process exits with a clear, non-zero
+    exit code.  Works for both local dev (.env file) and Docker (env vars
+    injected by docker-compose).
 
     Raises:
-        RuntimeError: If .env is missing or required keys are unset.
+        RuntimeError: If VISION_API_KEY or DECISION_API_KEY is unset.
     """
-    config.ensure_env_file()
     try:
         config.validate_required()
     except ValueError as exc:

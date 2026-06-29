@@ -8,8 +8,6 @@ are automatically mapped to UPPER_CASE environment variables.
 .env must be placed at the project root (current working directory).
 """
 
-from pathlib import Path
-
 from pydantic_settings import BaseSettings
 
 
@@ -44,18 +42,6 @@ class ProxyConfig(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
     }
-
-    @staticmethod
-    def ensure_env_file() -> None:
-        """Check that .env exists at the project root, raise if missing."""
-        env_path = Path(".env")
-        if not env_path.exists():
-            raise RuntimeError(
-                "未找到 .env 配置文件。\n"
-                "请在项目根目录创建 .env 文件（参考 backend/.env.example）：\n"
-                "  cp backend/.env.example .env\n"
-                "  编辑 .env 填入 VISION_API_KEY 和 DECISION_API_KEY"
-            )
 
     def validate_required(self) -> None:
         """Validate that all required configuration fields are set.
