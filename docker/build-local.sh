@@ -94,6 +94,8 @@ fi
 # .env 缺失时从 .env.example 创建
 ENV_FILE="$PROJECT_DIR/.env"
 ENV_EXAMPLE="$PROJECT_DIR/backend/.env.example"
+BACKEND_ENV="$PROJECT_DIR/backend/.env"
+
 if [ ! -f "$ENV_FILE" ]; then
     if [ -f "$ENV_EXAMPLE" ]; then
         cp "$ENV_EXAMPLE" "$ENV_FILE"
@@ -102,6 +104,12 @@ if [ ! -f "$ENV_FILE" ]; then
     else
         log_warn ".env 和 .env.example 均不存在，请手动创建 .env 文件"
     fi
+fi
+
+# Ensure backend/.env exists for Docker build context
+if [ ! -f "$BACKEND_ENV" ] && [ -f "$ENV_FILE" ]; then
+    cp "$ENV_FILE" "$BACKEND_ENV"
+    log_info "已从项目根目录同步 .env → backend/.env（供 Docker 构建使用）"
 fi
 
 # 1. 确保 Docker 在运行
@@ -119,6 +127,9 @@ DOCKER_BUILDKIT=1 docker build \
 }
 
 log_info "构建完成: ${IMAGE_NAME}:${IMAGE_TAG}"
+    # Remove dangling images from previous builds
+    docker image prune -f 2>/dev/null || true
+
 
 # 3. 自动启动容器
 if [ "$AUTO_START" = true ]; then
