@@ -171,7 +171,7 @@ class DecisionEngine:
                 raw_output = await self._call_model(full_prompt)
                 result = self._parse(raw_output)
 
-                logger.info(
+                logger.debug(
                     "Decision OK (attempt %d): hashes=%s mode=%s focus=%s",
                     attempt + 1, result.image_hashes, result.mode,
                     result.focus_prompt[:80],

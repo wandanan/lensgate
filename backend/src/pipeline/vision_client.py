@@ -162,7 +162,7 @@ def _compress_image(data: bytes, media_type: str) -> tuple[bytes, str]:
         img.save(buf, format=out_fmt, quality=85)
         compressed = buf.getvalue()
 
-        logger.info(
+        logger.debug(
             "Image compressed: %dx%d → %dx%d, %d → %d bytes (%s → %s)",
             w, h, new_size[0], new_size[1],
             len(data), len(compressed), media_type, out_mime,
@@ -231,7 +231,7 @@ class QwenVisionClient:
         b64 = base64.b64encode(data).decode("ascii")
         prompt = _build_prompt(focus_prompt)
 
-        logger.info("Vision request: model=%s size=%d media=%s focus=%.60s",
+        logger.debug("Vision request: model=%s size=%d media=%s focus=%.60s",
                      self._model, len(data), media_type, prompt)
 
         payload = {
@@ -308,7 +308,7 @@ class QwenVisionClient:
 
             if attempt < max_retries:
                 wait = 2 ** attempt  # 1, 2, 4, 8, 16 seconds
-                logger.info("Vision [%s]: retrying in %ds...", label, wait)
+                logger.debug("Vision [%s]: retrying in %ds...", label, wait)
                 await asyncio.sleep(wait)
 
         logger.warning("Vision [%s]: exhausted %d retries, last error: %s",
@@ -392,7 +392,7 @@ class QwenVisionClient:
         data, media_type = _compress_image(image.image_data, image.media_type or "image/png")
         b64 = base64.b64encode(data).decode("ascii")
 
-        logger.info("Vision replicate: model=%s size=%d media=%s",
+        logger.debug("Vision replicate: model=%s size=%d media=%s",
                      self._model, len(data), media_type)
 
         payload = {
