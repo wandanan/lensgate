@@ -22,7 +22,7 @@ import json
 import re
 from typing import Any
 
-from backend.src.models import (
+from backend.src.core.models import (
     ImageBlock,
     Message,
     ProxyRequest,

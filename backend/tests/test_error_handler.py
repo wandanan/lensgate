@@ -40,8 +40,8 @@ os.environ.setdefault("VISION_API_KEY", "test-vision-key")
 os.environ.setdefault("TARGET_DEFAULT_API_KEY", "test-target-key")
 
 from backend.src.app import app  # noqa: E402
-from backend.src.config import ProxyConfig  # noqa: E402
-from backend.src.error_handler import (  # noqa: E402
+from backend.src.core.config import ProxyConfig  # noqa: E402
+from backend.src.core.error_handler import (  # noqa: E402
     AppError,
     InvalidRequestError,
     PayloadTooLargeError,
@@ -51,9 +51,9 @@ from backend.src.error_handler import (  # noqa: E402
     check_config,
     register_error_handlers,
 )
-from backend.src.models import ImageBlock, ProxyRequest  # noqa: E402
-from backend.src.response_handler import ResponseHandler  # noqa: E402
-from backend.src.vision_client import FALLBACK_TEXT, QwenVisionClient  # noqa: E402
+from backend.src.core.models import ImageBlock, ProxyRequest  # noqa: E402
+from backend.src.pipeline.response_handler import ResponseHandler  # noqa: E402
+from backend.src.pipeline.vision_client import FALLBACK_TEXT, QwenVisionClient  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -105,12 +105,12 @@ def _make_httpx_response(status_code: int = 200, body: dict | None = None) -> Ma
 def test_compile_check():
     """TC-C07-BLD-001: error_handler.py compiles without syntax errors.
 
-    Given: backend/src/error_handler.py exists
-    When: python -m py_compile backend/src/error_handler.py
+    Given: backend/src/core/error_handler.py exists
+    When: python -m py_compile backend/src/core/error_handler.py
     Then: compile succeeds
     """
     result = subprocess.run(
-        [sys.executable, "-m", "py_compile", "backend/src/error_handler.py"],
+        [sys.executable, "-m", "py_compile", "backend/src/core/error_handler.py"],
         capture_output=True,
         text=True,
     )

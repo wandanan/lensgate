@@ -17,7 +17,7 @@ import pytest
 
 def test_proxy_request_creation():
     """ProxyRequest can be constructed and fields are accessible."""
-    from backend.src.models import ProxyRequest, Message, TextBlock
+    from backend.src.core.models import ProxyRequest, Message, TextBlock
 
     request = ProxyRequest(
         source_format="anthropic",
@@ -37,7 +37,7 @@ def test_proxy_request_creation():
 
 def test_message_role_valid():
     """Message accepts valid role values without exception."""
-    from backend.src.models import Message, TextBlock
+    from backend.src.core.models import Message, TextBlock
 
     content = [TextBlock(text="hi")]
 
@@ -57,7 +57,7 @@ def test_message_role_valid():
 
 def test_content_block_union():
     """Both TextBlock and ImageBlock can be used as ContentBlock."""
-    from backend.src.models import TextBlock, ImageBlock, ContentBlock
+    from backend.src.core.models import TextBlock, ImageBlock, ContentBlock
 
     text_block: ContentBlock = TextBlock(text="hello")
     assert isinstance(text_block, TextBlock)
@@ -83,7 +83,7 @@ def test_content_block_union():
 
 def test_image_block_fields():
     """ImageBlock stores and returns all fields correctly."""
-    from backend.src.models import ImageBlock
+    from backend.src.core.models import ImageBlock
 
     block = ImageBlock(
         image_data=b"\x89PNG\r\n\x1a\n",
@@ -105,7 +105,7 @@ def test_image_block_fields():
 
 def test_target_model_config():
     """TargetModelConfig stores model_id, api_base, api_key, extra_params."""
-    from backend.src.models import TargetModelConfig
+    from backend.src.core.models import TargetModelConfig
 
     config = TargetModelConfig(
         model_id="deepseek-v3.2",
@@ -125,7 +125,7 @@ def test_target_model_config():
 
 def test_target_model_config_default_extra_params():
     """TargetModelConfig extra_params defaults to empty dict."""
-    from backend.src.models import TargetModelConfig
+    from backend.src.core.models import TargetModelConfig
 
     config = TargetModelConfig(
         model_id="deepseek",

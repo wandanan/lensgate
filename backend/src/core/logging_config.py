@@ -7,7 +7,7 @@ using stdlib logging are captured by structlog as well.
 
 Usage::
 
-    from backend.src.logging_config import setup_logging, get_logger
+    from backend.src.core.logging_config import setup_logging, get_logger
 
     setup_logging(level="DEBUG")
     logger = get_logger(__name__)

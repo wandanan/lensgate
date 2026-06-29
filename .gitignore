@@ -5,3 +5,5 @@ __pycache__/
 dev/probe_requests_.jsonl
 *.egg-info/
 .pytest_cache/
+.claude/
+life_cycle_process/

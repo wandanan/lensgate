@@ -11,12 +11,12 @@ import json
 
 import pytest
 
-from backend.src.format_detector import (
+from backend.src.pipeline.format_detector import (
     detect_format,
     parse_anthropic_request,
     parse_openai_request,
 )
-from backend.src.models import ImageBlock, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+from backend.src.core.models import ImageBlock, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 
 
 # ---------------------------------------------------------------------------

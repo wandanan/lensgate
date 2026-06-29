@@ -14,10 +14,10 @@ from typing import AsyncGenerator
 import httpx
 from fastapi import FastAPI, Request
 
-from backend.src.cache_store import cache
-from backend.src.config import ProxyConfig
-from backend.src.decision_engine import DecisionEngine, DecisionResult
-from backend.src.error_handler import (
+from backend.src.pipeline.cache_store import cache
+from backend.src.core.config import ProxyConfig
+from backend.src.pipeline.decision_engine import DecisionEngine, DecisionResult
+from backend.src.core.error_handler import (
     InvalidRequestError,
     PayloadTooLargeError,
     TargetModelTimeoutError,
@@ -25,20 +25,20 @@ from backend.src.error_handler import (
     check_config,
     register_error_handlers,
 )
-from backend.src.format_detector import detect_format, parse_anthropic_request, parse_openai_request
-from backend.src.image_extractor import (
+from backend.src.pipeline.format_detector import detect_format, parse_anthropic_request, parse_openai_request
+from backend.src.pipeline.image_extractor import (
     extract_file_metadata,
     extract_images,
     has_images,
     image_hash,
 )
-from backend.src.logging_config import setup_logging
+from backend.src.core.logging_config import setup_logging
 from backend.src.middleware.auth import APIKeyMiddleware
-from backend.src.models import ImageBlock, ProxyRequest, TargetModelConfig
-from backend.src.request_rewriter import RequestRewriter
-from backend.src.response_handler import ResponseHandler
-from backend.src.target_client import TargetModelClient
-from backend.src.vision_client import QwenVisionClient
+from backend.src.core.models import ImageBlock, ProxyRequest, TargetModelConfig
+from backend.src.pipeline.request_rewriter import RequestRewriter
+from backend.src.pipeline.response_handler import ResponseHandler
+from backend.src.pipeline.target_client import TargetModelClient
+from backend.src.pipeline.vision_client import QwenVisionClient
 
 # ---------------------------------------------------------------------------
 # Config
@@ -552,7 +552,7 @@ _SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.D
 
 
 def _extract_user_messages(request: ProxyRequest, last_n: int = 5) -> list[str]:
-    from backend.src.models import TextBlock, ToolResultBlock
+    from backend.src.core.models import TextBlock, ToolResultBlock
 
     result: list[str] = []
     for msg in request.messages:

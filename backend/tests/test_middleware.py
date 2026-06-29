@@ -24,7 +24,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from backend.src.config import ProxyConfig
+from backend.src.core.config import ProxyConfig
 from backend.src.middleware.auth import APIKeyMiddleware
 
 

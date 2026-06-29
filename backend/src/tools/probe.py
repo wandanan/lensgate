@@ -1,7 +1,7 @@
 """
 Anthropic /v1/messages 请求结构探查服务器。
 
-启动: python -m backend.src.probe
+启动: python -m backend.src.tools.probe
 转储: dev/probe_requests_.jsonl
 """
 

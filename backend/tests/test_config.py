@@ -22,7 +22,7 @@ def test_proxy_config_from_env(monkeypatch):
     """ProxyConfig reads PROXY_PORT from environment."""
     monkeypatch.setenv("PROXY_PORT", "9090")
 
-    from backend.src.config import ProxyConfig
+    from backend.src.core.config import ProxyConfig
 
     config = ProxyConfig()
     assert config.proxy_port == 9090
@@ -42,7 +42,7 @@ def test_proxy_config_defaults(monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
 
-    from backend.src.config import ProxyConfig
+    from backend.src.core.config import ProxyConfig
 
     config = ProxyConfig()
     assert config.proxy_host == "0.0.0.0"
@@ -60,7 +60,7 @@ def test_target_model_config_from_env(monkeypatch):
     monkeypatch.setenv("TARGET_DEFAULT_BASE_URL", "https://test.com")
     monkeypatch.setenv("TARGET_DEFAULT_API_KEY", "key123")
 
-    from backend.src.models import TargetModelConfig
+    from backend.src.core.models import TargetModelConfig
 
     config = TargetModelConfig(
         model_id=os.environ["TARGET_DEFAULT_MODEL"],
@@ -81,7 +81,7 @@ def test_validate_required_raises_on_missing_keys(monkeypatch):
     and TARGET_DEFAULT_API_KEY are not set."""
     monkeypatch.delenv("VISION_API_KEY", raising=False)
 
-    from backend.src.config import ProxyConfig
+    from backend.src.core.config import ProxyConfig
 
     config = ProxyConfig()
     config.vision_api_key = ""
@@ -98,7 +98,7 @@ def test_validate_required_passes_when_keys_set(monkeypatch):
     monkeypatch.setenv("VISION_API_KEY", "sk-test-123")
     monkeypatch.setenv("TARGET_DEFAULT_API_KEY", "sk-test-456")
 
-    from backend.src.config import ProxyConfig
+    from backend.src.core.config import ProxyConfig
 
     config = ProxyConfig()
     # Should not raise

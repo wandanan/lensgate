@@ -22,8 +22,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from backend.src.models import TargetModelConfig
-from backend.src.target_client import TargetModelClient
+from backend.src.core.models import TargetModelConfig
+from backend.src.pipeline.target_client import TargetModelClient
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ async def test_forward_sends_correct_endpoint():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = _an200_response()
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         config = _make_config(api_base="https://api.example.com/v1/messages")
         await client.forward(_make_request_body(), config)
@@ -134,7 +134,7 @@ async def test_forward_carries_correct_auth_headers():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = _an200_response()
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         config = _make_config(api_key="test-key-123")
         await client.forward(_make_request_body(), config)
@@ -157,7 +157,7 @@ async def test_forward_returns_json_response():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = _an200_response()
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         response = await client.forward(_make_request_body(), _make_config())
 
@@ -188,7 +188,7 @@ async def test_forward_stream_yields_sse_lines():
     mock_client = MagicMock()
     mock_client.stream.return_value = mock_ctx
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         yielded: list[str] = []
         async for line in client.forward_stream(_make_request_body(), _make_config()):
@@ -213,7 +213,7 @@ async def test_forwarding_target_200():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = _an200_response()
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         response = await client.forward(_make_request_body(), _make_config())
 
@@ -243,7 +243,7 @@ async def test_forwarding_target_500_re_raises():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = mock_response
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         response = await client.forward(_make_request_body(), _make_config())
 
@@ -267,7 +267,7 @@ async def test_forwarding_timeout_re_raises():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.side_effect = httpx.TimeoutException("Read timeout")
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         with pytest.raises(httpx.TimeoutException, match="Read timeout"):
             await client.forward(_make_request_body(), _make_config())
@@ -300,7 +300,7 @@ async def test_forward_stream_sets_stream_true_in_body():
         "messages": [{"role": "user", "content": "hello"}],
     }
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         async for _ in client.forward_stream(body_without_stream, _make_config()):
             pass
@@ -336,7 +336,7 @@ async def test_forward_stream_client_disconnect_releases_stream():
     mock_client = MagicMock()
     mock_client.stream.return_value = mock_ctx
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         gen = client.forward_stream(_make_request_body(), _make_config())
 
@@ -372,7 +372,7 @@ async def test_forward_stream_skips_empty_lines():
     mock_client = MagicMock()
     mock_client.stream.return_value = mock_ctx
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         yielded: list[str] = []
         async for line in client.forward_stream(_make_request_body(), _make_config()):
@@ -388,7 +388,7 @@ async def test_client_close_is_idempotent():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = _an200_response()
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         await client.forward(_make_request_body(), _make_config())
         await client.close()
@@ -404,7 +404,7 @@ async def test_forward_timeout_set_to_60s():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_client.post.return_value = _an200_response()
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         await client.forward(_make_request_body(), _make_config())
 
@@ -427,7 +427,7 @@ async def test_forward_stream_timeout():
     mock_client = MagicMock()
     mock_client.stream.return_value = mock_ctx
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         async for _ in client.forward_stream(_make_request_body(), _make_config()):
             pass
@@ -451,7 +451,7 @@ async def test_forward_stream_timeout_yields_error_event():
     mock_client = MagicMock()
     mock_client.stream.side_effect = httpx.TimeoutException("connect timed out")
 
-    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("backend.src.pipeline.target_client.httpx.AsyncClient", return_value=mock_client):
         client = TargetModelClient()
         yielded: list[str] = []
         async for line in client.forward_stream(_make_request_body(), _make_config()):

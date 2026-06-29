@@ -31,7 +31,7 @@ def test_structlog_outputs_json(capsys):
 
     The JSON object must contain ``event``, ``level``, and ``timestamp`` keys.
     """
-    from backend.src.logging_config import setup_logging, get_logger
+    from backend.src.core.logging_config import setup_logging, get_logger
 
     # structlog holds global state; cache_logger_on_first_use=True means we
     # reconfigure for every test to avoid stale logger refs.
@@ -67,7 +67,7 @@ def test_structlog_outputs_json(capsys):
 
 def test_request_log_structure(capsys):
     """log_request helper emits all 4 required fields with correct values."""
-    from backend.src.logging_config import setup_logging, get_logger, log_request
+    from backend.src.core.logging_config import setup_logging, get_logger, log_request
 
     setup_logging(level="INFO")
 
@@ -98,7 +98,7 @@ def test_request_log_structure(capsys):
 
 def test_vision_log_structure(capsys):
     """log_vision helper emits image_count and vision_duration_ms fields."""
-    from backend.src.logging_config import setup_logging, get_logger, log_vision
+    from backend.src.core.logging_config import setup_logging, get_logger, log_vision
 
     setup_logging(level="INFO")
 
@@ -129,7 +129,7 @@ def test_error_log_includes_traceback(capsys):
     output lines and find the first one that parses as JSON and contains
     the expected ``event`` key.
     """
-    from backend.src.logging_config import setup_logging, get_logger
+    from backend.src.core.logging_config import setup_logging, get_logger
 
     setup_logging(level="DEBUG")
 
@@ -182,7 +182,7 @@ def test_error_log_with_exc_info_false_still_produces_json(capsys):
     This guards against a regression where the JSONRenderer chokes on
     missing exception info.
     """
-    from backend.src.logging_config import setup_logging, get_logger
+    from backend.src.core.logging_config import setup_logging, get_logger
 
     setup_logging(level="DEBUG")
 
@@ -228,7 +228,7 @@ def test_health_returns_status_ok():
 
 def test_request_produces_json_log_line(capsys):
     """An arbitrary request causes a JSON log line containing method & path."""
-    from backend.src.logging_config import setup_logging, get_logger, log_request
+    from backend.src.core.logging_config import setup_logging, get_logger, log_request
 
     setup_logging(level="INFO")
 
@@ -255,7 +255,7 @@ def test_request_produces_json_log_line(capsys):
 
 def test_setup_logging_respects_level(capsys):
     """DEBUG messages are suppressed when level is INFO."""
-    from backend.src.logging_config import setup_logging, get_logger
+    from backend.src.core.logging_config import setup_logging, get_logger
 
     setup_logging(level="INFO")
 
@@ -276,7 +276,7 @@ def test_setup_logging_respects_level(capsys):
 
 def test_setup_logging_level_debug_allows_debug(capsys):
     """DEBUG messages appear when level is DEBUG."""
-    from backend.src.logging_config import setup_logging, get_logger
+    from backend.src.core.logging_config import setup_logging, get_logger
 
     setup_logging(level="DEBUG")
 
@@ -303,7 +303,7 @@ def test_setup_logging_level_debug_allows_debug(capsys):
 
 def test_logger_can_bind_extra_context(capsys):
     """get_logger().bind(...) adds persistent context to subsequent calls."""
-    from backend.src.logging_config import setup_logging, get_logger
+    from backend.src.core.logging_config import setup_logging, get_logger
 
     setup_logging(level="INFO")
 

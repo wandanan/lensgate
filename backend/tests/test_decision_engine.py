@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.src.decision_engine import DecisionEngine, DecisionResult
+from backend.src.pipeline.decision_engine import DecisionEngine, DecisionResult
 
 
 # ---------------------------------------------------------------------------

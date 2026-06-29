@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.models import ImageBlock, Message, ProxyRequest, TextBlock
-from backend.src.request_rewriter import RequestRewriter
+from backend.src.core.models import ImageBlock, Message, ProxyRequest, TextBlock
+from backend.src.pipeline.request_rewriter import RequestRewriter
 
 
 # ============================================================================
@@ -67,7 +67,7 @@ def _make_anthropic_msg_content(content: list[dict]) -> dict:
 
 def test_compiles():
     """TC-C03-BLD-001: request_rewriter.py compiles without syntax errors."""
-    src = Path(__file__).parent.parent / "src" / "request_rewriter.py"
+    src = Path(__file__).parent.parent / "src" / "pipeline" / "request_rewriter.py"
     py_compile.compile(str(src), doraise=True)
 
 

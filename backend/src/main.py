@@ -12,7 +12,7 @@ from .app import app
 if __name__ == "__main__":
     import uvicorn
 
-    from backend.src.config import ProxyConfig
+    from backend.src.core.config import ProxyConfig
 
     config = ProxyConfig()
     host = os.environ.get("HOST", config.proxy_host)

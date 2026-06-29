@@ -31,8 +31,8 @@ import logging
 
 import httpx
 
-from backend.src.config import ProxyConfig
-from backend.src.models import ImageBlock
+from backend.src.core.config import ProxyConfig
+from backend.src.core.models import ImageBlock
 
 logger = logging.getLogger(__name__)
 

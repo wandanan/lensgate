@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 
-from backend.src.models import ImageBlock, ProxyRequest, TextBlock
+from backend.src.core.models import ImageBlock, ProxyRequest, TextBlock
 
 
 class RequestRewriter:

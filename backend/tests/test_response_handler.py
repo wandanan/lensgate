@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from backend.src.response_handler import ResponseHandler
+from backend.src.pipeline.response_handler import ResponseHandler
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ async def _consume_stream(streaming_response) -> list[str]:
 def test_compile_check():
     """TC-C05-BLD-001: response_handler.py compiles without syntax errors."""
     result = subprocess.run(
-        [sys.executable, "-m", "py_compile", "backend/src/response_handler.py"],
+        [sys.executable, "-m", "py_compile", "backend/src/pipeline/response_handler.py"],
         capture_output=True,
         text=True,
     )

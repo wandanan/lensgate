@@ -16,7 +16,7 @@ from typing import AsyncGenerator
 
 import httpx
 
-from backend.src.models import TargetModelConfig
+from backend.src.core.models import TargetModelConfig
 
 
 class TargetModelClient:

@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from backend.src.models import ImageBlock, Message, ProxyRequest, TextBlock
+from backend.src.core.models import ImageBlock, Message, ProxyRequest, TextBlock
 
 
 # ============================================================================
@@ -67,7 +67,7 @@ def _proxy_request_with_images(
 
 def test_compile_check():
     """image_extractor.py compiles without syntax errors."""
-    import backend.src.image_extractor  # noqa: F401
+    import backend.src.pipeline.image_extractor  # noqa: F401
 
 
 # ============================================================================
@@ -76,7 +76,7 @@ def test_compile_check():
 
 def test_has_images_text_only_returns_false():
     """has_images returns False when all content blocks are TextBlock."""
-    from backend.src.image_extractor import has_images
+    from backend.src.pipeline.image_extractor import has_images
 
     request = _proxy_request_text_only()
     assert has_images(request) is False
@@ -88,7 +88,7 @@ def test_has_images_text_only_returns_false():
 
 def test_has_images_with_image_returns_true():
     """has_images returns True when a message contains an ImageBlock."""
-    from backend.src.image_extractor import has_images
+    from backend.src.pipeline.image_extractor import has_images
 
     request = _proxy_request_with_images()
     assert has_images(request) is True
@@ -101,7 +101,7 @@ def test_has_images_with_image_returns_true():
 @pytest.mark.asyncio
 async def test_extract_images_returns_all_image_blocks():
     """extract_images returns a list with all ImageBlocks across all messages."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img1 = ImageBlock(
         media_type="image/png",
@@ -148,7 +148,7 @@ async def test_extract_images_returns_all_image_blocks():
 @pytest.mark.asyncio
 async def test_anthropic_base64_decode():
     """Anthropic source.type='base64' with source_data='aGVsbG8=' → b'hello'."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         media_type="image/png",
@@ -175,7 +175,7 @@ async def test_anthropic_base64_decode():
 @pytest.mark.asyncio
 async def test_image_block_indices_set():
     """ImageBlock in message 1, content position 2 gets correct indices."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         media_type="image/jpeg",
@@ -211,7 +211,7 @@ async def test_image_block_indices_set():
 @pytest.mark.asyncio
 async def test_media_type_from_anthropic_source():
     """Anthropic source.media_type='image/jpeg' preserved on ImageBlock."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         media_type="image/jpeg",
@@ -235,7 +235,7 @@ async def test_media_type_from_anthropic_source():
 @pytest.mark.asyncio
 async def test_openai_data_uri_parsed():
     """OpenAI data:image/png;base64,aGVsbG8= → b'hello', media_type='image/png'."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         source_type="data_uri",
@@ -261,7 +261,7 @@ async def test_openai_data_uri_parsed():
 @pytest.mark.asyncio
 async def test_extract_images_text_only_returns_empty():
     """extract_images returns [] when request contains no ImageBlocks."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     request = _proxy_request_text_only()
     result = await extract_images(request)
@@ -275,7 +275,7 @@ async def test_extract_images_text_only_returns_empty():
 @pytest.mark.asyncio
 async def test_sys_image_check_with_image_enters_extracting():
     """When request has image: has_images() == True, extract_images() non-empty."""
-    from backend.src.image_extractor import extract_images, has_images
+    from backend.src.pipeline.image_extractor import extract_images, has_images
 
     img = ImageBlock(
         media_type="image/png",
@@ -299,7 +299,7 @@ async def test_sys_image_check_with_image_enters_extracting():
 
 def test_sys_image_check_no_image_skips_extract():
     """When request has no image: has_images() == False."""
-    from backend.src.image_extractor import has_images
+    from backend.src.pipeline.image_extractor import has_images
 
     request = _proxy_request_text_only()
     assert has_images(request) is False
@@ -312,7 +312,7 @@ def test_sys_image_check_no_image_skips_extract():
 @pytest.mark.asyncio
 async def test_sys_url_download_failure_marks_error():
     """URL download fails → is_error=True, image_data=None, no exception raised."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         media_type="image/png",
@@ -343,7 +343,7 @@ async def test_sys_url_download_failure_marks_error():
 
 def test_sys_validate_valid_format():
     """validate_image_format returns True for image/png."""
-    from backend.src.image_extractor import validate_image_format
+    from backend.src.pipeline.image_extractor import validate_image_format
 
     block = ImageBlock(media_type="image/png")
     assert validate_image_format(block) is True
@@ -351,7 +351,7 @@ def test_sys_validate_valid_format():
 
 def test_validate_all_supported_formats():
     """All four whitelisted formats pass validation."""
-    from backend.src.image_extractor import validate_image_format
+    from backend.src.pipeline.image_extractor import validate_image_format
 
     for fmt in ("image/png", "image/jpeg", "image/webp", "image/gif"):
         block = ImageBlock(media_type=fmt)
@@ -364,7 +364,7 @@ def test_validate_all_supported_formats():
 
 def test_sys_validate_invalid_format():
     """validate_image_format returns False for unsupported image/bmp."""
-    from backend.src.image_extractor import validate_image_format
+    from backend.src.pipeline.image_extractor import validate_image_format
 
     block = ImageBlock(media_type="image/bmp")
     assert validate_image_format(block) is False
@@ -372,7 +372,7 @@ def test_sys_validate_invalid_format():
 
 def test_validate_various_invalid_formats():
     """Various unsupported formats all return False."""
-    from backend.src.image_extractor import validate_image_format
+    from backend.src.pipeline.image_extractor import validate_image_format
 
     for fmt in ("image/bmp", "image/tiff", "image/svg+xml", "video/mp4", ""):
         block = ImageBlock(media_type=fmt)
@@ -386,7 +386,7 @@ def test_validate_various_invalid_formats():
 @pytest.mark.asyncio
 async def test_multiple_images_same_message():
     """Multiple ImageBlocks in the same message are all extracted with correct indices."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img1 = ImageBlock(
         media_type="image/png",
@@ -413,7 +413,7 @@ async def test_multiple_images_same_message():
 @pytest.mark.asyncio
 async def test_image_data_already_populated_skipped():
     """When image_data is already set, resolution is skipped (no double-decode)."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         image_data=b"already_here",
@@ -436,7 +436,7 @@ async def test_image_data_already_populated_skipped():
 @pytest.mark.asyncio
 async def test_openai_data_uri_jpeg():
     """OpenAI data URI for JPEG is correctly parsed."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     # "world" in base64
     img = ImageBlock(
@@ -457,7 +457,7 @@ async def test_openai_data_uri_jpeg():
 @pytest.mark.asyncio
 async def test_invalid_data_uri_marks_error():
     """Malformed data URI → is_error=True, no exception raised."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         source_type="data_uri",
@@ -478,7 +478,7 @@ async def test_invalid_data_uri_marks_error():
 @pytest.mark.asyncio
 async def test_unknown_source_type_marks_error():
     """ImageBlock with unknown source_type → is_error=True."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         media_type="image/png",
@@ -499,7 +499,7 @@ async def test_unknown_source_type_marks_error():
 @pytest.mark.asyncio
 async def test_successful_url_download():
     """Successful URL download populates image_data correctly."""
-    from backend.src.image_extractor import extract_images
+    from backend.src.pipeline.image_extractor import extract_images
 
     img = ImageBlock(
         media_type="image/png",

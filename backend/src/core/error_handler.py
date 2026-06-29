@@ -26,7 +26,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from backend.src.config import ProxyConfig
+from backend.src.core.config import ProxyConfig
 
 # ---------------------------------------------------------------------------
 # Exception hierarchy
@@ -130,7 +130,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     Usage::
 
-        from backend.src.error_handler import register_error_handlers
+        from backend.src.core.error_handler import register_error_handlers
         register_error_handlers(app)
     """
 

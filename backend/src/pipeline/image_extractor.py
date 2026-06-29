@@ -14,8 +14,8 @@ import re
 
 import httpx
 
-from backend.src.cache_store import cache
-from backend.src.models import ImageBlock, ProxyRequest, ToolResultBlock
+from backend.src.pipeline.cache_store import cache
+from backend.src.core.models import ImageBlock, ProxyRequest, ToolResultBlock
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -103,7 +103,7 @@ def extract_file_metadata(request: ProxyRequest, img: ImageBlock) -> tuple[str, 
     if parent_idx is not None and msg_idx > 0:
         prev_msg = request.messages[msg_idx - 1]
         for block in prev_msg.content:
-            from backend.src.models import ToolUseBlock
+            from backend.src.core.models import ToolUseBlock
             if isinstance(block, ToolUseBlock) and block.name == "Read":
                 file_path = block.input.get("file_path", "")
                 if file_path:
