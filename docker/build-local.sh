@@ -92,7 +92,7 @@ if [ ! -f "$PROJECT_DIR/$COMPOSE_FILE" ]; then
 fi
 
 # .env 缺失时从 .env.example 创建
-ENV_FILE="$PROJECT_DIR/backend/.env"
+ENV_FILE="$PROJECT_DIR/.env"
 ENV_EXAMPLE="$PROJECT_DIR/backend/.env.example"
 if [ ! -f "$ENV_FILE" ]; then
     if [ -f "$ENV_EXAMPLE" ]; then
@@ -130,5 +130,5 @@ if [ "$AUTO_START" = true ]; then
         exit 1
     }
     log_info "容器已启动: tlma-gateway"
-    log_info "健康检查: http://localhost:8080/health"
+    log_info "健康检查: http://localhost:9856/health"
 fi

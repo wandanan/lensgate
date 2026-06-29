@@ -46,8 +46,8 @@ def test_proxy_config_defaults(monkeypatch):
 
     config = ProxyConfig()
     assert config.proxy_host == "0.0.0.0"
-    assert config.proxy_port == 8080
-    assert config.vision_timeout == 30
+    assert config.proxy_port == 9856
+    assert config.vision_timeout == 180
 
 
 # ---------------------------------------------------------------------------

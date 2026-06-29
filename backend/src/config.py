@@ -27,7 +27,7 @@ class ProxyConfig(BaseSettings):
     vision_api_key: str = ""
     vision_base_url: str = "https://coding.dashscope.aliyuncs.com"
     vision_model: str = "qwen3.7-plus"
-    vision_timeout: int = 30
+    vision_timeout: int = 180
 
     # --- Decision engine (lightweight intent recognition) ---
     decision_api_key: str = ""

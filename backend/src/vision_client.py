@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import logging
 
@@ -43,7 +44,30 @@ FALLBACK_TEXT: str = "[图片无法识别]"
 
 DEFAULT_PROMPT: str = "请描述这张图片的内容。"
 
+# Task-framing prefix prepended to every vision prompt.  Pins the model's
+# role to "observe only" so it does not drift into generating code, HTML,
+# docs, or fix proposals — which bloats output and burns the token budget.
+_TASK_CONSTRAINT: str = (
+    "你是视觉分析器。仅针对图片实际可见的内容输出观察结论(中文)。"
+    "禁止生成代码、HTML、文档、实现方案、修复建议或重写代码;禁止替用户完成任务;禁止输出与图像分析无关的内容。"
+    "只描述你在图中真正看到的东西,看到什么说什么,不确定就说明。"
+)
+
 _MAX_RETRIES = 5
+
+# Output cap. Compare tasks that drift into codegen hit 4096 and stall for
+# 100s+; 1500 is ample for an observation report and truncates drift early.
+_MAX_OUTPUT_TOKENS = 1500
+
+# Images larger than this (bytes) are compressed before sending to vision API.
+_COMPRESS_THRESHOLD = 128 * 1024  # 128 KB
+
+# Max dimension (longest side) after resize.
+# Vision models bill image tokens per pixel (~0.0013 token/pixel), so
+# reducing dimensions is the only lever that actually cuts cost and time —
+# PNG→JPEG byte shrinking does not. 1024 keeps text/code detail legible
+# while halving image_tokens vs 1600-wide originals.
+_MAX_DIMENSION = 1024
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,8 +80,58 @@ def _is_retryable(status: int) -> bool:
 
 
 def _build_prompt(focus: str) -> str:
-    """Return the vision prompt — default description, or user's focus if given."""
-    return focus or DEFAULT_PROMPT
+    """Return the vision prompt — task constraint + focus (or default)."""
+    body = focus or DEFAULT_PROMPT
+    return f"{_TASK_CONSTRAINT}\n\n任务：{body}"
+
+
+def _compress_image(data: bytes, media_type: str) -> tuple[bytes, str]:
+    """Compress images over the byte threshold to avoid vision API timeouts.
+
+    Strategy:
+    - If dimensions > _MAX_DIMENSION: resize first, then compress
+    - If under dimension limit but over byte limit: convert PNG → JPEG
+    - Returns (compressed_bytes, media_type)
+    """
+    if len(data) <= _COMPRESS_THRESHOLD:
+        return data, media_type
+
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(data))
+        w, h = img.size
+
+        # Resize if too large in dimensions
+        scale = _MAX_DIMENSION / max(w, h)
+        if scale < 1.0:
+            new_size = (int(w * scale), int(h * scale))
+            img = img.resize(new_size, Image.LANCZOS)
+        else:
+            new_size = (w, h)
+
+        # Convert RGBA/P → RGB for JPEG compatibility
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        # Use JPEG for RGB, PNG otherwise
+        out_fmt = "JPEG" if img.mode == "RGB" else "PNG"
+        out_mime = "image/jpeg" if out_fmt == "JPEG" else "image/png"
+        buf = io.BytesIO()
+        img.save(buf, format=out_fmt, quality=85)
+        compressed = buf.getvalue()
+
+        logger.info(
+            "Image compressed: %dx%d → %dx%d, %d → %d bytes (%s → %s)",
+            w, h, new_size[0], new_size[1],
+            len(data), len(compressed), media_type, out_mime,
+        )
+        return compressed, out_mime
+
+    except Exception:
+        logger.warning("Image compression failed, sending original", exc_info=True)
+        return data, media_type
+
 
 # ---------------------------------------------------------------------------
 # QwenVisionClient
@@ -112,12 +186,12 @@ class QwenVisionClient:
             return FALLBACK_TEXT
 
         url = f"{self._base_url}/v1/chat/completions"
-        b64 = base64.b64encode(image.image_data).decode("ascii")
-        media_type = image.media_type or "image/png"
+        data, media_type = _compress_image(image.image_data, image.media_type or "image/png")
+        b64 = base64.b64encode(data).decode("ascii")
         prompt = _build_prompt(focus_prompt)
 
         logger.info("Vision request: model=%s size=%d media=%s focus=%.60s",
-                     self._model, len(image.image_data), media_type, prompt)
+                     self._model, len(data), media_type, prompt)
 
         payload = {
             "model": self._model,
@@ -135,7 +209,7 @@ class QwenVisionClient:
                     ],
                 }
             ],
-            "max_tokens": 4096,
+            "max_tokens": _MAX_OUTPUT_TOKENS,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -145,14 +219,20 @@ class QwenVisionClient:
         return await self._call_with_retry(url, payload, headers, "single")
 
     async def _call_with_retry(self, url: str, payload: dict, headers: dict, label: str) -> str:
-        """Post to vision API with exponential backoff retry (5 retries max).
+        """Post to vision API with exponential backoff retry.
 
         Retryable: 429, 5xx, TimeoutException, RequestError
         Non-retryable: 4xx (except 429), JSONDecodeError
+
+        Timeouts cap at 2 retries: a timeout usually means the task is too
+        heavy for one call, so re-sending the identical heavy payload just
+        burns wall-clock repeating the same slow run.  429/5xx are transient
+        and keep the full 5-retry budget.
         """
         last_error = ""
         client = self._get_client()
-        for attempt in range(_MAX_RETRIES + 1):
+        max_retries = _MAX_RETRIES
+        for attempt in range(max_retries + 1):
             try:
                 async with self._semaphore:
                     resp = await client.post(url, json=payload, headers=headers)
@@ -168,27 +248,30 @@ class QwenVisionClient:
 
                 last_error = f"HTTP {resp.status_code}"
                 logger.warning("Vision [%s]: %s (attempt %d/%d)",
-                               label, last_error, attempt + 1, _MAX_RETRIES + 1)
+                               label, last_error, attempt + 1, max_retries + 1)
 
             except httpx.TimeoutException:
                 last_error = f"timeout ({self._timeout}s)"
-                logger.warning("Vision [%s]: %s (attempt %d/%d)",
-                               label, last_error, attempt + 1, _MAX_RETRIES + 1)
+                # Shrink the retry budget for timeouts — re-sending an
+                # identical heavy payload only repeats the same slow run.
+                max_retries = min(max_retries, 2)
+                logger.warning("Vision [%s]: %s (attempt %d/%d, retry cap %d)",
+                               label, last_error, attempt + 1, max_retries + 1, max_retries)
             except httpx.RequestError as e:
                 last_error = f"request error: {e}"
                 logger.warning("Vision [%s]: %s (attempt %d/%d)",
-                               label, last_error, attempt + 1, _MAX_RETRIES + 1)
+                               label, last_error, attempt + 1, max_retries + 1)
             except json.JSONDecodeError as e:
                 logger.warning("Vision [%s]: JSON parse error — %s", label, e)
                 return FALLBACK_TEXT
 
-            if attempt < _MAX_RETRIES:
+            if attempt < max_retries:
                 wait = 2 ** attempt  # 1, 2, 4, 8, 16 seconds
                 logger.info("Vision [%s]: retrying in %ds...", label, wait)
                 await asyncio.sleep(wait)
 
         logger.warning("Vision [%s]: exhausted %d retries, last error: %s",
-                       label, _MAX_RETRIES, last_error)
+                       label, max_retries, last_error)
         return FALLBACK_TEXT
 
     async def recognize_batch(self, images: list[ImageBlock]) -> list[str]:
@@ -225,8 +308,8 @@ class QwenVisionClient:
         for img in images:
             if img.image_data is None:
                 continue
-            b64 = base64.b64encode(img.image_data).decode("ascii")
-            media = img.media_type or "image/png"
+            data, media = _compress_image(img.image_data, img.media_type or "image/png")
+            b64 = base64.b64encode(data).decode("ascii")
             content.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:{media};base64,{b64}"},
@@ -240,7 +323,7 @@ class QwenVisionClient:
         payload = {
             "model": self._model,
             "messages": [{"role": "user", "content": content}],
-            "max_tokens": 4096,
+            "max_tokens": _MAX_OUTPUT_TOKENS,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",

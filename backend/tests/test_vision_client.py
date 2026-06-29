@@ -117,7 +117,7 @@ async def test_recognize_sends_correct_request():
     # Verify the JSON payload.
     payload = call_args[1]["json"]
     assert payload["model"] == "qwen3.7-plus"
-    assert payload["max_tokens"] == 4096
+    assert payload["max_tokens"] == 1500
 
     # Verify the content contains an image_url block.
     messages = payload["messages"]
@@ -137,6 +137,35 @@ async def test_recognize_sends_correct_request():
     # Verify headers.
     headers = call_args[1]["headers"]
     assert headers["Authorization"] == "Bearer sk-test-key"
+
+
+# ============================================================================
+# Prompt constraint is prepended (prevents model drift into codegen)
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_prompt_has_task_constraint():
+    """The vision prompt is prefixed with the role/limitation constraint.
+
+    Without it, kimi-k2.5 drifts into generating HTML/code instead of an
+    observation report, burning the token budget and stalling for 100s+.
+    """
+    config = _config()
+    image = _image_block()
+
+    mock_resp = _make_mock_response(200, "ok")
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = _setup_httpx_mock(mock_client_cls, [mock_resp])
+
+        from backend.src.vision_client import QwenVisionClient, _TASK_CONSTRAINT
+
+        client = QwenVisionClient(config)
+        await client.recognize(image, focus_prompt="检查代码高亮")
+
+    text_block = mock_client.post.call_args[1]["json"]["messages"][0]["content"][1]["text"]
+    assert text_block.startswith(_TASK_CONSTRAINT)
+    assert "检查代码高亮" in text_block
 
 
 # ============================================================================

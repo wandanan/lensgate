@@ -116,6 +116,37 @@ class TargetModelClient:
             method, url, headers=fwd_headers, timeout=httpx.Timeout(30.0),
         )
 
+    async def forward_passthrough(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        api_key: str,
+    ) -> httpx.Response:
+        """Forward a request verbatim (headers + body) to the target URL.
+
+        Used for non-conversational endpoints such as Anthropic's
+        ``/v1/messages/count_tokens`` — their request/response shape differs
+        from ``/v1/messages`` and must bypass the vision/rewrite pipeline.
+        The target URL keeps its full suffix (e.g. ``/count_tokens``).
+        """
+        fwd_headers = {
+            k: v for k, v in headers.items()
+            if k.lower() not in (
+                "host", "content-length", "transfer-encoding",
+                "connection", "x-api-key", "x-target-base-url",
+            )
+        }
+        if api_key:
+            fwd_headers["x-api-key"] = api_key
+
+        client = self._get_client()
+        return await client.request(
+            method, url, headers=fwd_headers, content=body,
+            timeout=httpx.Timeout(60.0),
+        )
+
     async def forward_stream(
         self, request_body: dict, config: TargetModelConfig
     ) -> AsyncGenerator[str, None]:

@@ -182,6 +182,47 @@ def test_anthropic_stream_flag():
     assert resp.status_code == 200
 
 
+def test_count_tokens_endpoint_passthrough():
+    """POST /v1/messages/count_tokens bypasses the pipeline and forwards verbatim.
+
+    Anthropic SDK calls count_tokens before large requests. Its response shape
+    ({"input_tokens": N}) differs from /v1/messages, so it must skip the
+    vision/rewrite pipeline and keep the /count_tokens suffix on the target URL.
+    Previously this raised ValueError → 500.
+    """
+    body = {
+        "model": "claude-sonnet-4-6",
+        "messages": [{"role": "user", "content": "estimate me"}],
+    }
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = b'{"input_tokens": 42}'
+    mock_resp.headers = {"content-type": "application/json"}
+
+    with patch("backend.src.app._get_target_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.forward_passthrough.return_value = mock_resp
+        mock_get_client.return_value = mock_client
+
+        resp = client.post(
+            f"/{TEST_TARGET}/v1/messages/count_tokens", json=body
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["input_tokens"] == 42
+
+    # Verify it used the passthrough path (not forward/forward_stream).
+    mock_client.forward_passthrough.assert_awaited_once()
+    mock_client.forward.assert_not_called()
+    mock_client.forward_stream.assert_not_called()
+
+    # Verify the target URL kept the /count_tokens suffix.
+    call_kwargs = mock_client.forward_passthrough.call_args.kwargs
+    assert call_kwargs["url"].endswith("/v1/messages/count_tokens")
+    # And the body was forwarded (not dropped).
+    assert call_kwargs["body"]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

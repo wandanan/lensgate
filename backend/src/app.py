@@ -121,6 +121,14 @@ async def _run_pipeline(request: Request, target: str):
     if request.method != "POST":
         return await _forward_raw(request, target_url, target_api_key)
 
+    # --- Non-conversational POST endpoints (count_tokens, etc.) ---
+    # These have a different request/response shape than /v1/messages and
+    # must bypass the vision/rewrite pipeline. detect_format() only knows
+    # /v1/messages and /v1/chat/completions, so any other POST suffix
+    # (e.g. /v1/messages/count_tokens) would otherwise raise ValueError → 500.
+    if _is_passthrough_path(str(request.url.path)):
+        return await _forward_passthrough(request, target_url, target_api_key)
+
     # --- Parse JSON ---
     try:
         body = await request.json()
@@ -180,7 +188,13 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
     # PATH A/B — new images in latest message
     if new_images:
         logger.info("New images in latest message: %d", len(new_images))
-        vision_results = await _vision_and_cache(new_images, decision, proxy_request)
+        # Extract ALL images (including earlier messages) — latest_only misses
+        # images in tool_result from previous Read tool calls.
+        all_images = await extract_images(proxy_request, latest_only=False)
+        if len(all_images) > len(new_images):
+            logger.info("Also processing %d images from earlier messages",
+                        len(all_images) - len(new_images))
+        vision_results = await _vision_and_cache(all_images, decision, proxy_request)
         proxy_request = rewriter.rewrite(proxy_request, vision_results)
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
@@ -313,7 +327,34 @@ async def _forward_raw(request: Request, target_url: str, api_key: str):
     )
 
 
+async def _forward_passthrough(request: Request, target_url: str, api_key: str):
+    """Pass-through a POST request verbatim (headers + body) to the target.
+
+    Used for non-conversational endpoints (e.g. count_tokens) whose
+    request/response shape differs from /v1/messages and must skip the
+    vision/rewrite pipeline. The full target URL (with suffix) is preserved.
+    """
+    body = await request.body()
+    client = _get_target_client()
+    resp = await client.forward_passthrough(
+        method=request.method,
+        url=target_url,
+        headers=dict(request.headers),
+        body=body,
+        api_key=api_key,
+    )
+    from fastapi.responses import Response
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=dict(resp.headers),
+    )
+
+
 async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
+    # Safety net: warn if raw image data is being forwarded to target
+    _warn_if_body_has_images(body)
+
     client = _get_target_client()
     try:
         if stream:
@@ -333,6 +374,22 @@ async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_passthrough_path(path: str) -> bool:
+    """Return True for POST endpoints that must bypass the pipeline.
+
+    Conversational endpoints (/v1/messages, /v1/chat/completions) go through
+    the vision/rewrite pipeline. Anything else — e.g. Anthropic's
+    /v1/messages/count_tokens — has a different request/response shape and
+    is forwarded verbatim. detect_format() would otherwise raise ValueError.
+    """
+    clean = path.split("?")[0].rstrip("/")
+    if clean.endswith("/v1/messages"):
+        return False
+    if clean.endswith("/v1/chat/completions"):
+        return False
+    return True
 
 
 def _resolve_target_url(request: Request, target: str) -> str:
@@ -396,6 +453,42 @@ def _make_label(desc: str) -> str:
     if not desc:
         return ""
     return desc.strip()[:40]
+
+
+def _warn_if_body_has_images(body: dict) -> None:
+    """Log a warning if the request body still contains raw image data.
+
+    Recursively scans message content blocks (including tool_result) for
+    Anthropic ``type: image`` or OpenAI ``type: image_url`` blocks that
+    should have been replaced by Rewrite before reaching _forward.
+    """
+
+    def _scan(blocks):
+        if not isinstance(blocks, list):
+            return
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            bt = block.get("type", "")
+            if bt == "image":
+                src = block.get("source", {})
+                logger.warning(
+                    "SAFEGUARD: forwarding body with RAW image "
+                    "(source=%s, media=%s, data_len=%d)",
+                    src.get("type"), src.get("media_type", "?"),
+                    len(src.get("data", "")),
+                )
+            elif bt == "image_url":
+                url = block.get("image_url", {}).get("url", "")
+                logger.warning(
+                    "SAFEGUARD: forwarding body with RAW image_url (url_len=%d)",
+                    len(url),
+                )
+            elif bt == "tool_result":
+                _scan(block.get("content"))
+
+    for msg in body.get("messages", []):
+        _scan(msg.get("content"))
 
 
 _SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
