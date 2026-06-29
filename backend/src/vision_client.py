@@ -59,6 +59,47 @@ _MAX_RETRIES = 5
 # 100s+; 1500 is ample for an observation report and truncates drift early.
 _MAX_OUTPUT_TOKENS = 1500
 
+# Specialised prompt for design→code replication.  The vision model is told
+# to act as a measurement tool that extracts exact CSS values from a UI
+# screenshot.  This avoids the precision loss of natural-language colour
+# descriptions ("warm yellow" → #f59e0b).
+_REPLICATE_PROMPT: str = (
+    "你是设计测量工具。从截图中精确提取视觉规范,只输出CSS自定义属性。\n"
+    "\n"
+    "严格按以下格式输出,禁止任何解释、描述或额外文字:\n"
+    "\n"
+    "<style>\n"
+    ":root {\n"
+    "  --bg-primary: <页面背景色hex>;\n"
+    "  --bg-secondary: <次要背景色hex,如卡片/区块>;\n"
+    "  --text-primary: <主文字色hex>;\n"
+    "  --text-secondary: <次要文字色hex>;\n"
+    "  --accent: <强调色/品牌色hex>;\n"
+    "  --accent-hover: <强调色hover态hex,比accent深10-15%>;\n"
+    "  --font-family: <字体栈,优先系统字体>;\n"
+    "  --font-size-title: <标题字号,含单位>;\n"
+    "  --font-size-body: <正文字号,含单位>;\n"
+    "  --radius-sm: <小圆角,含单位>;\n"
+    "  --radius-md: <中圆角,含单位>;\n"
+    "  --radius-lg: <大圆角,含单位>;\n"
+    "  --radius-full: 9999px;\n"
+    "  --shadow-card: <卡片阴影,如 0 4px 20px rgba(0,0,0,0.06)>;\n"
+    "  --container-max: <内容区最大宽度,含单位>;\n"
+    "  --nav-height: <导航栏高度或padding,含单位>;\n"
+    "  --section-gap: <区块间距,含单位>;\n"
+    "  --card-padding: <卡片内边距,含单位>;\n"
+    "}\n"
+    "</style>\n"
+    "\n"
+    "规则:\n"
+    "- 颜色必须精确到hex值(如 #f8f7f4)。不确定时给出最佳估计,不要写颜色名称。\n"
+    "- 尺寸精确到像素。从图片比例推算,不求精确到1px但求比例正确。\n"
+    "- 如界面有多套配色(深色/浅色),只提取当前显示的那套。\n"
+    "- 最多输出上面列出的变量。不要追加额外的CSS规则、布局代码或注释。\n"
+    "- 禁止输出HTML标签(除<style>包裹外)。禁止输出完整HTML页面。禁止输出JavaScript。\n"
+    "- 禁止markdown代码块包裹。禁止解释。只输出<style>:root{...}</style>。"
+)
+
 # Images larger than this (bytes) are compressed before sending to vision API.
 _COMPRESS_THRESHOLD = 128 * 1024  # 128 KB
 
@@ -331,3 +372,51 @@ class QwenVisionClient:
         }
 
         return await self._call_with_retry(url, payload, headers, "compare")
+
+    async def recognize_replicate(self, image: ImageBlock) -> str:
+        """Extract precise CSS variables from a UI screenshot.
+
+        Uses a specialised prompt that instructs the vision model to output
+        ``:root { ... }`` CSS custom properties instead of natural-language
+        description.  This eliminates the precision loss of "warm yellow"
+        → #f59e0b guessing by the downstream target model.
+
+        Returns the CSS block as a string, or ``""`` on failure so the
+        pipeline can fall back to a text description.
+        """
+        if image.image_data is None:
+            logger.warning("Vision replicate: image_data is None")
+            return ""
+
+        url = f"{self._base_url}/v1/chat/completions"
+        data, media_type = _compress_image(image.image_data, image.media_type or "image/png")
+        b64 = base64.b64encode(data).decode("ascii")
+
+        logger.info("Vision replicate: model=%s size=%d media=%s",
+                     self._model, len(data), media_type)
+
+        payload = {
+            "model": self._model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{b64}"},
+                        },
+                        {"type": "text", "text": _REPLICATE_PROMPT},
+                    ],
+                }
+            ],
+            "max_tokens": 1024,  # CSS variables are small, cap prevents drift
+        }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        result = await self._call_with_retry(url, payload, headers, "replicate")
+        if result == FALLBACK_TEXT:
+            return ""
+        return result

@@ -242,6 +242,10 @@ async def _vision_and_cache(
     if decision.mode == "compare" and len(images) >= 2:
         return await _vision_compare_locked(images, focus, proxy_request)
 
+    # --- Replicate mode: extract CSS variables instead of text description ---
+    if decision.mode == "replicate":
+        return await _vision_replicate(images, proxy_request)
+
     logger.info("[SINGLE] %d image(s) — individual vision calls", len(images))
     results: list[tuple[ImageBlock, str]] = []
     for img in images:
@@ -303,6 +307,59 @@ async def _vision_compare_locked(
     finally:
         for h, lock in locks:
             cache.release_lock(h)
+
+
+async def _vision_replicate(
+    images: list[ImageBlock],
+    proxy_request: ProxyRequest,
+) -> list[tuple[ImageBlock, str]]:
+    """Replicate mode: extract CSS variables per image, with caching.
+
+    Each image is sent individually to the vision model with a specialised
+    prompt that outputs ``:root { --bg: #xxx; ... }`` CSS custom properties.
+    The CSS block replaces the image in the downstream request so the target
+    model receives precise design values instead of vague "warm yellow" text.
+    """
+    logger.info("[REPLICATE] %d image(s) — CSS variable extraction", len(images))
+    results: list[tuple[ImageBlock, str]] = []
+    # replicate mode uses a fixed prompt — cache key focus is always ""
+    focus = ""
+
+    for img in images:
+        h = image_hash(img)
+        if not h:
+            css = await vision_client.recognize_replicate(img)
+            # Degrade to text description if CSS extraction fails.
+            if not css:
+                css = await vision_client.recognize(img, "请描述这张图片的视觉设计规范，包括颜色、字体、间距。")
+            results.append((img, css))
+            continue
+
+        cached_hit = cache.get(h, focus)
+        if cached_hit:
+            results.append((img, cached_hit))
+            logger.info("  [CACHE HIT] %s (replicate)", h[:12])
+            continue
+
+        lock = cache.acquire_lock(h)
+        await lock.acquire()
+        try:
+            cached_hit = cache.get(h, focus)
+            if cached_hit:
+                results.append((img, cached_hit))
+                logger.info("  [CACHE HIT] %s (replicate, after lock)", h[:12])
+                continue
+            css = await vision_client.recognize_replicate(img)
+            if not css:
+                css = await vision_client.recognize(img, "请描述这张图片的视觉设计规范，包括颜色、字体、间距。")
+            logger.info("  [VI-SPEC OUTPUT] %.200s", css.strip().replace('\n', ' '))
+            fname, pos = extract_file_metadata(proxy_request, img)
+            cache.set(h, css, focus, fname, pos, _make_label(css))
+            results.append((img, css))
+            logger.info("  [VI-SPEC OK] %s", h[:12])
+        finally:
+            cache.release_lock(h)
+    return results
 
 
 # ---------------------------------------------------------------------------

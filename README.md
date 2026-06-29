@@ -1,5 +1,7 @@
 # 多模态代理网关 (TLMA)
 
+> [English version](README_EN.md)
+
 为纯文本 LLM（如DeepSeek、GLM）提供透明多模态代理层。代理自动拦截图片、识图转为文字描述、再转发给文本模型，让纯文本模型也能"看见"图片。
 
 决策引擎根据用户意图自动路由视觉注意力：单图描述、多图对比、或跳过无关历史图。
@@ -13,7 +15,7 @@ Claude Code ──POST /api.deepseek.com/anthropic/v1/messages──▶ TLMA :98
   │                                                            │
   │  ① 格式检测 (Anthropic/OpenAI)                              │
   │  ② 图片提取 + 缓存查询                                     │
-  │  ③ 决策引擎 (DeepSeek Chat) — 选图、定向、single/compare  │
+  │  ③ 决策引擎 (DeepSeek Chat) — 选图、定向、single/compare/replicate  │
   │  ④ 视觉模型 (Kimi-K2.5) — 识图 → 文字描述                  │
   │  ⑤ 请求重写 (image block → text block)                     │
   │  ⑥ 目标转发 (火山方舟 Coding Plan)                         │
@@ -21,6 +23,48 @@ Claude Code ──POST /api.deepseek.com/anthropic/v1/messages──▶ TLMA :98
   │                                                            │
   └── 纯文本请求跳过 ③④⑤，直通 ⑥ ─────────────────────────────┘
 ```
+
+## 与传统视觉代理方案的区别
+
+传统的视觉代理只是简单的"图片→文字→转发"管道。TLMA 在此基础上做了四个关键设计：
+
+### 1. 三模型协同 vs 两模型串联
+
+```
+传统方案:  视觉模型 → 目标模型           (固定串联,每一张图都要调视觉API)
+TLMA:      决策引擎 → 视觉模型 → 目标模型  (决策引擎先判断"值不值得调视觉")
+```
+
+**决策引擎**在视觉调用前先做一次轻量文本判断(< 0.5s):用户是在追问还是发了新图?这张图需要重识还是用缓存?单图看细节还是双图对比?——决策引擎输出 `mode: single | compare | replicate`,按需触发视觉调用。无图片的纯文本请求连决策引擎都跳过,零额外开销。
+
+### 2. VI-Spec 精确视觉规范 vs 自然语言描述
+
+```
+传统方案:  截图 → "暖黄色按钮,大号圆角,浅色背景" → 目标模型猜 #f59e0b? 14px? #f8f7f4?
+TLMA:     截图 → :root { --accent: #f59e0b; --radius-md: 14px; --bg-primary: #f8f7f4; } → 直接用
+```
+
+**replicate 模式**下,视觉模型被当作"设计测量工具",从截图精确提取 CSS 变量。500 字节的 CSS 消除"暖黄色"→`#f59e0b` 的语义损失。目标模型收到的是精确值,不是模糊描述。适用场景:UI 设计稿→代码、VI 规范复刻、设计评审。
+
+### 3. 智能缓存 vs 无缓存/简单缓存
+
+```
+传统方案:  同一张图被反复识图(每次追问都重新调用视觉API)
+TLMA:     (图片SHA-256, 聚焦指令) 组合键缓存,同一张图不同视角可分别命中
+```
+
+缓存不再是简单的"图片→描述",而是 `(图片哈希, 聚焦指令)` 组合键。用户换一个角度问同一张图("这次看按钮颜色" vs "上次看整体布局"),不会命中旧缓存,而是用新 focus 重新识图。同一视角重复追问则零成本命中。
+
+### 4. 路径级透明路由 vs 固定目标配置
+
+```
+传统方案:  代理写死转发到某个模型,换目标要改配置重启
+TLMA:     POST /api.deepseek.com/anthropic/v1/messages → 转发到 DeepSeek
+          POST /ark.cn-beijing.volces.com/api/coding/v1/messages → 转发到火山方舟
+          目标编码在 URL 路径里,换目标不改配置
+```
+
+不需要在服务端配置"转发到哪个模型"。客户端把目标主机塞进 URL 路径,代理自动解析、透传认证、保留完整后缀。同一个代理服务可以同时服务多个不同目标模型的客户端。
 
 ## 快速开始
 
@@ -163,6 +207,16 @@ claude config set anthropic_base_url http://localhost:9856/api.deepseek.com/anth
 
 当决策引擎判定为 `compare` 模式时，多张图片在**一次**视觉 API 调用中发送，让模型在图像 token 间做交叉注意力，实现真正的跨图对比分析。
 
+### 视觉复刻 (VI-Spec)
+
+当用户说"照着这个做页面""复刻这个设计"时，决策引擎触发 `replicate` 模式。视觉模型不再输出文字描述，而是被当作**设计测量工具**，从截图精确提取 CSS 变量：
+
+```css
+--accent: #f59e0b; --radius-md: 14px; --bg-primary: #f8f7f4;
+```
+
+目标模型直接使用精确值生成代码，消除"暖黄色"→`#f59e0b` 的语义翻译损失。500 字节 CSS 替代 200 字模糊描述。
+
 ### 降级策略
 
 视觉服务不可用时不影响基本使用：
@@ -178,7 +232,7 @@ claude config set anthropic_base_url http://localhost:9856/api.deepseek.com/anth
 | 图片提取 | `image_extractor.py` | content blocks 图像提取 + 缓存 |
 | 视觉识别 | `vision_client.py` | Kimi-K2.5 / Qwen 识图 + 压缩 |
 | 请求重写 | `request_rewriter.py` | ImageBlock → TextBlock 替换 |
-| 决策引擎 | `decision_engine.py` | 注意力路由（单图/对比/跳过） |
+| 决策引擎 | `decision_engine.py` | 注意力路由（单图/对比/复刻/跳过） |
 | 缓存存储 | `cache_store.py` | SHA-256 + focus 组合键缓存 |
 | 目标转发 | `target_client.py` | 火山方舟 / DeepSeek 转发 |
 | 响应处理 | `response_handler.py` | SSE 流式 + JSON 非流式 |

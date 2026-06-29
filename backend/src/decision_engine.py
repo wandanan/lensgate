@@ -74,7 +74,9 @@ class DecisionEngine:
         "你是图片注意力路由器。根据用户消息和缓存图片摘要,"
         "调用 route_decision 函数输出路由决策。禁止直接回答用户问题。\n"
         "缓存图片带有位置标签(第1张/第2张)和文件名,"
-        "用户说'图一''第一张'时严格匹配位置标签。"
+        "用户说'图一''第一张'时严格匹配位置标签。\n"
+        "如果用户要求'复刻界面''照着做页面''实现这个设计''design to code'等设计稿→代码任务,"
+        "使用 replicate 模式。"
     )
 
     TOOL_DEFINITION = {
@@ -96,8 +98,8 @@ class DecisionEngine:
                     },
                     "mode": {
                         "type": "string",
-                        "enum": ["single", "compare"],
-                        "description": "单图识别还是多图对比",
+                        "enum": ["single", "compare", "replicate"],
+                        "description": "single=单图描述, compare=多图对比, replicate=设计复刻(提取CSS变量)",
                     },
                     "reasoning": {
                         "type": "string",
@@ -324,17 +326,20 @@ class DecisionEngine:
         if hashes:
             _validate_hashes(hashes)
 
+        mode = obj.get("mode", "single")
+        if mode not in ("single", "compare", "replicate"):
+            raise _DecisionValidationError(
+                f"mode must be 'single', 'compare' or 'replicate', got: {mode!r}"
+            )
+
         fp = obj.get("focus_prompt", "")
         if not isinstance(fp, str):
             raise _DecisionValidationError("focus_prompt must be a string")
         fp_stripped = fp.strip()
-        if fp_stripped and hashes:
+        # replicate mode carries its own self-contained prompt — focus is optional.
+        if fp_stripped and hashes and mode != "replicate":
             _validate_focus(fp_stripped)
         fp = fp_stripped[:500]
-
-        mode = obj.get("mode", "single")
-        if mode not in ("single", "compare"):
-            raise _DecisionValidationError(f"mode must be 'single' or 'compare', got: {mode!r}")
 
         reasoning = obj.get("reasoning", "")
         if not isinstance(reasoning, str):
