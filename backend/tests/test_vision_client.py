@@ -349,12 +349,12 @@ async def test_sys_recognizing_api_success():
 
 @pytest.mark.asyncio
 async def test_sys_recognizing_api_failure_degradation():
-    """System behaviour §4: non-200 → '[图片无法识别]', no exception."""
+    """System behaviour §4: non-200 non-auth → '[图片无法识别]', no exception."""
     config = _config()
     image = _image_block()
 
-    # Test several failure status codes.
-    for status in (400, 401, 403, 500, 502, 503):
+    # Non-auth failures should degrade gracefully.
+    for status in (400, 500, 502, 503):
         mock_resp = _make_mock_response(status, "")
 
         with patch("httpx.AsyncClient") as mock_client_cls:
@@ -366,7 +366,27 @@ async def test_sys_recognizing_api_failure_degradation():
             result = await client.recognize(image)
 
         assert result == "[图片无法识别]", f"status {status} should degrade"
-        # Must not raise.
+
+
+@pytest.mark.asyncio
+async def test_sys_auth_error_raises_service_auth_error():
+    """401/403 on vision API → ServiceAuthError, not fallback text."""
+    from backend.src.core.error_handler import ServiceAuthError
+
+    config = _config()
+    image = _image_block()
+
+    for status in (401, 403):
+        mock_resp = _make_mock_response(status, "")
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            _setup_httpx_mock(mock_client_cls, [mock_resp])
+
+            from backend.src.pipeline.vision_client import QwenVisionClient
+
+            client = QwenVisionClient(config)
+            with pytest.raises(ServiceAuthError):
+                await client.recognize(image)
 
 
 # ============================================================================

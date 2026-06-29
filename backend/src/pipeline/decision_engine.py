@@ -21,6 +21,8 @@ from typing import Any
 
 import httpx
 
+from backend.src.core.error_handler import ServiceAuthError
+
 logger = logging.getLogger(__name__)
 
 _VALUATION_PATH = Path("valuation/valuation.jsonl")
@@ -171,10 +173,9 @@ class DecisionEngine:
                 raw_output = await self._call_model(full_prompt)
                 result = self._parse(raw_output)
 
-                logger.debug(
-                    "Decision OK (attempt %d): hashes=%s mode=%s focus=%s",
-                    attempt + 1, result.image_hashes, result.mode,
-                    result.focus_prompt[:80],
+                logger.info(
+                    "Decision OK (attempt %d): mode=%s images=%d",
+                    attempt + 1, result.mode, len(result.image_hashes),
                 )
 
                 _write_valuation({
@@ -198,6 +199,9 @@ class DecisionEngine:
                 })
 
                 return result
+
+            except ServiceAuthError:
+                raise  # 密钥无效，不重试，直接报错
 
             except _DecisionValidationError as exc:
                 last_error = str(exc)
@@ -297,6 +301,11 @@ class DecisionEngine:
         client = self._get_client()
 
         resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code in (401, 403):
+            raise ServiceAuthError(
+                f"决策模型 API 密钥无效或已过期 (HTTP {resp.status_code})。"
+                f"请检查 .env 中的 DECISION_API_KEY。"
+            )
         resp.raise_for_status()
         data = resp.json()
 

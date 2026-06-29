@@ -32,6 +32,7 @@ import logging
 import httpx
 
 from backend.src.core.config import ProxyConfig
+from backend.src.core.error_handler import ServiceAuthError
 from backend.src.core.models import ImageBlock
 
 logger = logging.getLogger(__name__)
@@ -162,10 +163,10 @@ def _compress_image(data: bytes, media_type: str) -> tuple[bytes, str]:
         img.save(buf, format=out_fmt, quality=85)
         compressed = buf.getvalue()
 
-        logger.debug(
-            "Image compressed: %dx%d → %dx%d, %d → %d bytes (%s → %s)",
+        logger.info(
+            "Image compressed: %dx%d → %dx%d, %d → %d bytes",
             w, h, new_size[0], new_size[1],
-            len(data), len(compressed), media_type, out_mime,
+            len(data), len(compressed),
         )
         return compressed, out_mime
 
@@ -231,8 +232,7 @@ class QwenVisionClient:
         b64 = base64.b64encode(data).decode("ascii")
         prompt = _build_prompt(focus_prompt)
 
-        logger.debug("Vision request: model=%s size=%d media=%s focus=%.60s",
-                     self._model, len(data), media_type, prompt)
+        logger.info("Vision request: model=%s size=%d", self._model, len(data))
 
         payload = {
             "model": self._model,
@@ -283,6 +283,11 @@ class QwenVisionClient:
                     return data["choices"][0]["message"]["content"]
 
                 if not _is_retryable(resp.status_code):
+                    if resp.status_code in (401, 403):
+                        raise ServiceAuthError(
+                            f"视觉模型 API 密钥无效或已过期 (HTTP {resp.status_code})。"
+                            f"请检查 .env 中的 VISION_API_KEY。"
+                        )
                     logger.warning("Vision [%s]: HTTP %d (non-retryable) — %s",
                                    label, resp.status_code, resp.text[:300])
                     return FALLBACK_TEXT
@@ -308,7 +313,7 @@ class QwenVisionClient:
 
             if attempt < max_retries:
                 wait = 2 ** attempt  # 1, 2, 4, 8, 16 seconds
-                logger.debug("Vision [%s]: retrying in %ds...", label, wait)
+                logger.info("Vision [%s]: retrying in %ds...", label, wait)
                 await asyncio.sleep(wait)
 
         logger.warning("Vision [%s]: exhausted %d retries, last error: %s",
@@ -392,8 +397,7 @@ class QwenVisionClient:
         data, media_type = _compress_image(image.image_data, image.media_type or "image/png")
         b64 = base64.b64encode(data).decode("ascii")
 
-        logger.debug("Vision replicate: model=%s size=%d media=%s",
-                     self._model, len(data), media_type)
+        logger.info("Vision replicate: model=%s size=%d", self._model, len(data))
 
         payload = {
             "model": self._model,

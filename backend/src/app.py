@@ -182,8 +182,9 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
     else:
         decision = _default_decision(len(new_images))
 
-    logger.debug("Decision: mode=%s hashes=%s focus=%.80s reasoning=%s",
-                decision.mode, decision.image_hashes, decision.focus_prompt, decision.reasoning)
+    logger.info("Decision: mode=%s images=%d focus=%.40s",
+                decision.mode, len(decision.image_hashes),
+                decision.focus_prompt[:40])
 
     # PATH A/B — new images in latest message
     if new_images:
@@ -211,6 +212,16 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
 
     # PATH D — decision engine selects which historical images to re-vision
     if not decision.image_hashes:
+        # Decision engine failed (retries exhausted) — fall back to
+        # processing ALL images instead of silently skipping.
+        if "retries exhausted" in decision.reasoning:
+            logger.warning("Decision engine failed, processing all images")
+            all_images = await extract_images(proxy_request, latest_only=False)
+            fallback = _default_decision(len(all_images))
+            vision_results = await _vision_and_cache(all_images, fallback, proxy_request)
+            proxy_request = rewriter.rewrite(proxy_request, vision_results)
+            return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
+
         logger.info("Decision: skip (no relevant images for current question)")
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
@@ -221,7 +232,7 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
         logger.warning("Decision requested images not found in body")
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
-    logger.debug("[RE-VISION] %d images from history, mode=%s", len(target_images), decision.mode)
+    logger.info("[RE-VISION] %d images from history, mode=%s", len(target_images), decision.mode)
     vision_results = await _vision_and_cache(target_images, decision, proxy_request)
     proxy_request = rewriter.rewrite(proxy_request, vision_results)
     return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
@@ -246,7 +257,7 @@ async def _vision_and_cache(
     if decision.mode == "replicate":
         return await _vision_replicate(images, proxy_request)
 
-    logger.debug("[SINGLE] %d image(s) — individual vision calls", len(images))
+    logger.info("[SINGLE] %d image(s)", len(images))
     results: list[tuple[ImageBlock, str]] = []
     for img in images:
         h = image_hash(img)
@@ -258,7 +269,7 @@ async def _vision_and_cache(
         cached_hit = cache.get(h, focus)
         if cached_hit:
             results.append((img, cached_hit))
-            logger.debug("  [CACHE HIT] %s", h[:12])
+            logger.info("  [CACHE HIT] %s", h[:12])
             continue
 
         lock = cache.acquire_lock(h)
@@ -267,14 +278,14 @@ async def _vision_and_cache(
             cached_hit = cache.get(h, focus)
             if cached_hit:
                 results.append((img, cached_hit))
-                logger.debug("  [CACHE HIT] %s (after lock)", h[:12])
+                logger.info("  [CACHE HIT] %s (after lock)", h[:12])
                 continue
             desc = await vision_client.recognize(img, focus)
             logger.debug("  [VISION OUTPUT] %.300s", desc)
             fname, pos = extract_file_metadata(proxy_request, img)
             cache.set(h, desc, focus, fname, pos, _make_label(desc))
             results.append((img, desc))
-            logger.debug("  [VISION OK] %s", h[:12])
+            logger.info("  [VISION OK] %s", h[:12])
         finally:
             cache.release_lock(h)
     return results
@@ -286,7 +297,7 @@ async def _vision_compare_locked(
     proxy_request: ProxyRequest,
 ) -> list[tuple[ImageBlock, str]]:
     """Compare mode with per-hash locking — acquire all locks before calling vision."""
-    logger.debug("[COMPARE] %d images in ONE vision call | focus=%s", len(images), focus[:100])
+    logger.info("[COMPARE] %d images in ONE vision call", len(images))
 
     hashes = [image_hash(img) for img in images]
     locks: list[tuple[str, asyncio.Lock]] = []
@@ -320,7 +331,7 @@ async def _vision_replicate(
     The CSS block replaces the image in the downstream request so the target
     model receives precise design values instead of vague "warm yellow" text.
     """
-    logger.debug("[REPLICATE] %d image(s) — CSS variable extraction", len(images))
+    logger.info("[REPLICATE] %d image(s)", len(images))
     results: list[tuple[ImageBlock, str]] = []
     # replicate mode uses a fixed prompt — cache key focus is always ""
     focus = ""
@@ -338,7 +349,7 @@ async def _vision_replicate(
         cached_hit = cache.get(h, focus)
         if cached_hit:
             results.append((img, cached_hit))
-            logger.debug("  [CACHE HIT] %s (replicate)", h[:12])
+            logger.info("  [CACHE HIT] %s (replicate)", h[:12])
             continue
 
         lock = cache.acquire_lock(h)
@@ -347,7 +358,7 @@ async def _vision_replicate(
             cached_hit = cache.get(h, focus)
             if cached_hit:
                 results.append((img, cached_hit))
-                logger.debug("  [CACHE HIT] %s (replicate, after lock)", h[:12])
+                logger.info("  [CACHE HIT] %s (replicate, after lock)", h[:12])
                 continue
             css = await vision_client.recognize_replicate(img)
             if not css:
@@ -356,7 +367,7 @@ async def _vision_replicate(
             fname, pos = extract_file_metadata(proxy_request, img)
             cache.set(h, css, focus, fname, pos, _make_label(css))
             results.append((img, css))
-            logger.debug("  [VI-SPEC OK] %s", h[:12])
+            logger.info("  [VI-SPEC OK] %s", h[:12])
         finally:
             cache.release_lock(h)
     return results

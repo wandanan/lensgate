@@ -115,6 +115,19 @@ class PayloadTooLargeError(AppError):
         )
 
 
+class ServiceAuthError(AppError):
+    """An upstream API key (vision or decision engine) is invalid or expired.
+
+    Mapped to HTTP 502 — ``"service_auth_failed"``.
+    The message identifies which service and what went wrong.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message, status_code=502, error_type="service_auth_failed"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Handler registration
 # ---------------------------------------------------------------------------
@@ -150,15 +163,16 @@ def register_error_handlers(app: FastAPI) -> None:
 
 
 def check_config(config: ProxyConfig) -> None:
-    """Validate required configuration fields at startup.
+    """Validate configuration at startup — .env existence + required keys.
 
-    Calls ``config.validate_required()`` internally and re-raises any
-    ``ValueError`` as a ``RuntimeError`` so that the process exits with a
-    clear, non-zero exit code.
+    Calls ``config.ensure_env_file()`` then ``config.validate_required()``
+    and re-raises any ``ValueError`` as a ``RuntimeError`` so that the
+    process exits with a clear, non-zero exit code.
 
     Raises:
-        RuntimeError: If ``VISION_API_KEY`` is empty / unset.
+        RuntimeError: If .env is missing or required keys are unset.
     """
+    config.ensure_env_file()
     try:
         config.validate_required()
     except ValueError as exc:
