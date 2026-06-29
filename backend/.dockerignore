@@ -13,8 +13,8 @@ __pycache__/
 # Tests (not needed at runtime)
 tests/
 
-# Environment (.env excluded, config.ini IS baked in)
-.env
+# Environment (.env is baked into image; examples are excluded)
+.env.example
 .env.*
 
 # IDE

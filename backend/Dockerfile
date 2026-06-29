@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # Application code under backend/ so imports (backend.src.xxx) resolve
 COPY . ./backend/
 
+# Bake .env into image so pydantic-settings finds it at /app/.env
+COPY .env /app/.env
+
 # Create writable directory for valuation logs
 RUN mkdir -p /app/valuation && chmod 777 /app/valuation
 

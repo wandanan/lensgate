@@ -39,7 +39,7 @@ class ProxyConfig(BaseSettings):
     decision_timeout: int = 5
 
     model_config = {
-        "env_file": ".env",
+        "env_file": [".env", "backend/.env"],
         "env_file_encoding": "utf-8",
     }
 
