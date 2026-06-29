@@ -66,12 +66,15 @@ No server-side target configuration. The client encodes the target host in the U
 
 ## Quick Start
 
+> **Important: `.env` must be placed at the project root.** On startup, the config loader checks `root .env` first, then falls back to `backend/.env`. Missing required keys will **crash at startup** with a clear error — no silent degradation.
+
 ### Docker (Recommended)
 
 ```bash
-# 1. Create .env and fill in your API keys
+# 1. Create .env at project root and fill in your API keys
 cp backend/.env.example .env
 # Edit .env: fill in VISION_API_KEY, DECISION_API_KEY
+#   ⚠️ Place at project root, NOT inside backend/
 
 # 2. Build image + start container
 bash docker/build-local.sh
@@ -89,15 +92,18 @@ python -m venv .venv
 source .venv/bin/pip install -r backend/requirements.txt   # Linux/macOS
 # .venv/Scripts/pip install -r backend/requirements.txt    # Windows
 
-# 2. Environment
+# 2. Create .env at project root
 cp backend/.env.example .env
 # Edit .env: fill in VISION_API_KEY, DECISION_API_KEY
+#   ⚠️ Place at project root, NOT inside backend/
 
 # 3. Run
 PYTHONPATH=. python -m backend.src.main
 ```
 
 Listens on `http://0.0.0.0:9856`.
+
+> **Startup failure?** Check that `VISION_API_KEY` and `DECISION_API_KEY` are set in the root `.env`. Missing either key causes a hard crash — the proxy will not start with incomplete config.
 
 ## Configuration
 
@@ -220,21 +226,24 @@ Vision service failures never block the user:
 
 ## Modules
 
-| Module | File | Responsibility |
-|------|------|------|
-| Config | `config.py` | Environment / .env loading |
-| Format Detection | `format_detector.py` | Anthropic / OpenAI request parsing |
-| Image Extraction | `image_extractor.py` | Content block image extraction + cache |
-| Vision Client | `vision_client.py` | Kimi-K2.5 / Qwen recognition + compression |
-| Request Rewriter | `request_rewriter.py` | ImageBlock → TextBlock replacement |
-| Decision Engine | `decision_engine.py` | Attention routing (single/compare/replicate/skip) |
-| Cache Store | `cache_store.py` | SHA-256 + focus composite-key cache |
-| Target Client | `target_client.py` | Volcengine / DeepSeek forwarding |
-| Response Handler | `response_handler.py` | SSE streaming + JSON non-streaming |
-| Auth Middleware | `middleware/auth.py` | x-api-key validation and forwarding |
-| Error Handler | `error_handler.py` | Unified 400/413/503/504 exception mapping |
-| Logging | `logging_config.py` | Structured logging |
-| Pipeline | `app.py` | 7-stage pipeline + pure-text fast path |
+| Layer | Module | File | Responsibility |
+|------|------|------|------|
+| **core/** | Config | `core/config.py` | Env / .env loading (fallback: root → backend/) |
+| | Models | `core/models.py` | ProxyRequest / ImageBlock / ContentBlock |
+| | Error Handler | `core/error_handler.py` | 400/413/503/504 mapping + startup validation |
+| | Logging | `core/logging_config.py` | Structured logging (structlog JSON) |
+| **pipeline/** | Format Detection | `pipeline/format_detector.py` | Anthropic / OpenAI request parsing |
+| | Image Extraction | `pipeline/image_extractor.py` | Image extraction + cache |
+| | Vision Client | `pipeline/vision_client.py` | Kimi-K2.5 / Qwen recognition + compression |
+| | Request Rewriter | `pipeline/request_rewriter.py` | ImageBlock → TextBlock replacement |
+| | Decision Engine | `pipeline/decision_engine.py` | Attention routing (single/compare/replicate/skip) |
+| | Cache Store | `pipeline/cache_store.py` | SHA-256 + focus composite-key cache |
+| | Target Client | `pipeline/target_client.py` | Volcengine / DeepSeek forwarding |
+| | Response Handler | `pipeline/response_handler.py` | SSE streaming + JSON non-streaming |
+| **middleware/** | Auth Middleware | `middleware/auth.py` | x-api-key validation and forwarding |
+| **tools/** | Probe | `tools/probe.py` | API request structure inspection |
+| — | Pipeline | `app.py` | 7-stage pipeline + pure-text fast path |
+| — | Entry Point | `main.py` | uvicorn server |
 
 ## Testing
 

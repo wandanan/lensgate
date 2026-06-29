@@ -68,12 +68,15 @@ TLMA:     POST /api.deepseek.com/anthropic/v1/messages → 转发到 DeepSeek
 
 ## 快速开始
 
+> **重要：`.env` 必须放在项目根目录。** 程序启动时按 `根目录 .env` → `backend/.env` 顺序查找，根目录优先。缺失必填 Key 会**启动失败并报错**，不会静默降级。
+
 ### Docker（推荐）
 
 ```bash
-# 1. 编辑 .env，填入 API Key
+# 1. 在项目根目录创建 .env，填入 API Key
 cp backend/.env.example .env
 # 编辑 .env：填入 VISION_API_KEY、DECISION_API_KEY
+#   ⚠️ 放根目录，不是 backend/ 下
 
 # 2. 构建镜像 + 启动容器
 bash docker/build-local.sh
@@ -91,9 +94,10 @@ python -m venv .venv
 .venv/Scripts/pip install -r backend/requirements.txt   # Windows
 # source .venv/bin/pip install -r backend/requirements.txt  # Linux/macOS
 
-# 2. 环境变量
+# 2. 在项目根目录创建 .env
 cp backend/.env.example .env
 # 编辑 .env，填入 VISION_API_KEY、DECISION_API_KEY
+#   ⚠️ 放根目录，不是 backend/ 下
 
 # 3. 启动
 # Git Bash / WSL
@@ -107,6 +111,8 @@ set PYTHONPATH=. && python -m backend.src.main
 ```
 
 服务监听 `http://0.0.0.0:9856`。
+
+> **启动失败？** 检查根目录 `.env` 中 `VISION_API_KEY` 和 `DECISION_API_KEY` 是否已填写。缺失任一 Key 都会报错退出，不会被绕过。
 
 ## 配置参考
 
@@ -225,21 +231,24 @@ claude config set anthropic_base_url http://localhost:9856/api.deepseek.com/anth
 
 ## 模块
 
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| 配置管理 | `config.py` | 环境变量 / .env 加载 |
-| 格式检测 | `format_detector.py` | Anthropic / OpenAI 请求解析 |
-| 图片提取 | `image_extractor.py` | content blocks 图像提取 + 缓存 |
-| 视觉识别 | `vision_client.py` | Kimi-K2.5 / Qwen 识图 + 压缩 |
-| 请求重写 | `request_rewriter.py` | ImageBlock → TextBlock 替换 |
-| 决策引擎 | `decision_engine.py` | 注意力路由（单图/对比/复刻/跳过） |
-| 缓存存储 | `cache_store.py` | SHA-256 + focus 组合键缓存 |
-| 目标转发 | `target_client.py` | 火山方舟 / DeepSeek 转发 |
-| 响应处理 | `response_handler.py` | SSE 流式 + JSON 非流式 |
-| 认证中间件 | `middleware/auth.py` | x-api-key 校验与转发 |
-| 错误处理 | `error_handler.py` | 400/413/503/504 统一异常映射 |
-| 日志 | `logging_config.py` | 结构化日志 |
-| 管道编排 | `app.py` | 7 阶段管道 + 纯文本直通 |
+| 层 | 模块 | 文件 | 职责 |
+|------|------|------|------|
+| **core/** | 配置管理 | `core/config.py` | 环境变量 / .env 加载（回退查找根目录→backend/） |
+| | 数据模型 | `core/models.py` | ProxyRequest / ImageBlock / ContentBlock |
+| | 错误处理 | `core/error_handler.py` | 400/413/503/504 统一异常映射 + 启动校验 |
+| | 日志 | `core/logging_config.py` | 结构化日志 (structlog JSON) |
+| **pipeline/** | 格式检测 | `pipeline/format_detector.py` | Anthropic / OpenAI 请求解析 |
+| | 图片提取 | `pipeline/image_extractor.py` | content blocks 图像提取 + 缓存 |
+| | 视觉识别 | `pipeline/vision_client.py` | Kimi-K2.5 / Qwen 识图 + 压缩 |
+| | 请求重写 | `pipeline/request_rewriter.py` | ImageBlock → TextBlock 替换 |
+| | 决策引擎 | `pipeline/decision_engine.py` | 注意力路由（单图/对比/复刻/跳过） |
+| | 缓存存储 | `pipeline/cache_store.py` | SHA-256 + focus 组合键缓存 |
+| | 目标转发 | `pipeline/target_client.py` | 火山方舟 / DeepSeek 转发 |
+| | 响应处理 | `pipeline/response_handler.py` | SSE 流式 + JSON 非流式 |
+| **middleware/** | 认证中间件 | `middleware/auth.py` | x-api-key 校验与转发 |
+| **tools/** | 请求探针 | `tools/probe.py` | API 请求结构探查 |
+| — | 管道编排 | `app.py` | 7 阶段管道 + 纯文本直通 |
+| — | 启动入口 | `main.py` | uvicorn server |
 
 ## 测试
 

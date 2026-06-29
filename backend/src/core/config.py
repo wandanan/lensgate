@@ -36,18 +36,26 @@ class ProxyConfig(BaseSettings):
     decision_timeout: int = 5
 
     model_config = {
-        "env_file": ".env",
+        "env_file": [".env", "backend/.env"],
         "env_file_encoding": "utf-8",
     }
 
     def validate_required(self) -> None:
         """Validate that all required configuration fields are set.
 
-        Only VISION_API_KEY is required server-side.  Target routing
-        is driven by the client request path, not by fixed config.
+        VISION_API_KEY (Aliyun Bailian) + DECISION_API_KEY (DeepSeek)
+        are required server-side.  Target routing is driven by the
+        client request path, not by fixed config.
         """
+        missing = []
         if not self.vision_api_key:
+            missing.append("VISION_API_KEY (Aliyun Bailian — 识图服务)")
+        if not self.decision_api_key:
+            missing.append("DECISION_API_KEY (DeepSeek — 决策引擎)")
+        if missing:
             raise ValueError(
-                "Missing required configuration: VISION_API_KEY. "
-                "Set it via environment variable or .env file."
+                "Missing required configuration:\n  "
+                + "\n  ".join(missing)
+                + "\n\n请在项目根目录或 backend/.env 中设置，或通过环境变量传入。\n"
+                "镜像运行时: docker compose 会自动挂载根目录 .env。"
             )
