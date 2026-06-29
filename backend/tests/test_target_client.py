@@ -414,8 +414,12 @@ async def test_forward_timeout_set_to_60s():
 
 
 @pytest.mark.asyncio
-async def test_forward_stream_timeout_set_to_120s():
-    """Streaming forward uses a 120-second timeout."""
+async def test_forward_stream_timeout():
+    """Streaming forward disables read timeout (SSE pauses are normal).
+
+    Connect = 30 s, write = 60 s, read = None (no limit — thinking models
+    routinely idle 30-120 s between tokens).
+    """
     sse_lines = ['data: {"type":"message_stop"}']
     mock_response = _MockStreamResponse(sse_lines)
     mock_ctx = _MockStreamCtx(mock_response)
@@ -430,4 +434,29 @@ async def test_forward_stream_timeout_set_to_120s():
 
     _, kwargs = mock_client.stream.call_args
     timeout = kwargs["timeout"]
-    assert timeout.read == 120.0
+    assert timeout.connect == 30.0
+    assert timeout.read is None
+    assert timeout.write == 60.0
+
+
+@pytest.mark.asyncio
+async def test_forward_stream_timeout_yields_error_event():
+    """Connect/write timeout → graceful SSE error, not a raw 500 from Starlette.
+
+    Read timeout is disabled (read=None), so this only triggers on connect
+    or write.  Before the fix, httpx.ReadTimeout would propagate unhandled
+    through the generator and crash Starlette's stream_response with a 500.
+    """
+    # Simulate a connect/write timeout during stream setup.
+    mock_client = MagicMock()
+    mock_client.stream.side_effect = httpx.TimeoutException("connect timed out")
+
+    with patch("backend.src.target_client.httpx.AsyncClient", return_value=mock_client):
+        client = TargetModelClient()
+        yielded: list[str] = []
+        async for line in client.forward_stream(_make_request_body(), _make_config()):
+            yielded.append(line)
+
+    assert len(yielded) == 1
+    assert '"error"' in yielded[0]
+    assert "target_stream_timeout" in yielded[0]

@@ -153,6 +153,12 @@ class TargetModelClient:
         """Forward a streaming POST request to the target model.
 
         Uses ``config.api_base`` as the full target URL.
+
+        Read timeout is disabled (``read=None``) because SSE streams can have
+        arbitrarily long pauses between events — thinking/推理 models routinely
+        idle for 30-120 s between tokens, and a read timeout would kill the
+        stream mid-response, producing an unhandled ``httpx.ReadTimeout`` that
+        propagates through Starlette as a raw 500.
         """
         url = config.api_base
         headers = self._build_headers(config)
@@ -160,12 +166,18 @@ class TargetModelClient:
         body: dict = {**request_body, "stream": True}
         client = self._get_client()
 
-        async with client.stream(
-            "POST",
-            url,
-            json=body,
-            headers=headers,
-            timeout=httpx.Timeout(120.0),
-        ) as response:
-            async for line in response.aiter_lines():
-                yield line + "\n"
+        try:
+            async with client.stream(
+                "POST",
+                url,
+                json=body,
+                headers=headers,
+                timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=10.0),
+            ) as response:
+                async for line in response.aiter_lines():
+                    yield line + "\n"
+        except httpx.TimeoutException:
+            # connect / write timeout (read is disabled).  Emit a graceful
+            # SSE error so the client sees a structured failure instead of
+            # a mid-stream hang or a raw 500 from Starlette.
+            yield 'data: {"type":"error","error":"target_stream_timeout"}\n\n'
