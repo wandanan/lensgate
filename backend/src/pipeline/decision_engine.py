@@ -46,7 +46,7 @@ _MAX_USER_MSG_LEN = 4000
 class DecisionResult:
     """Parsed decision output."""
 
-    __slots__ = ("image_hashes", "focus_prompt", "mode", "reasoning")
+    __slots__ = ("image_hashes", "focus_prompt", "mode", "reasoning", "raw_output", "attempt")
 
     def __init__(
         self,
@@ -54,11 +54,15 @@ class DecisionResult:
         focus_prompt: str = "",
         mode: str = "single",
         reasoning: str = "",
+        raw_output: str = "",
+        attempt: int = 0,
     ):
         self.image_hashes = image_hashes or []
         self.focus_prompt = focus_prompt
         self.mode = mode
         self.reasoning = reasoning
+        self.raw_output = raw_output
+        self.attempt = attempt
 
     def __repr__(self) -> str:
         return (
@@ -175,6 +179,8 @@ class DecisionEngine:
 
                 raw_output = await self._call_model(full_prompt)
                 result = self._parse(raw_output)
+                result.raw_output = raw_output
+                result.attempt = attempt + 1
 
                 logger.debug("Decision raw output: %s", raw_output)
                 logger.debug(

@@ -50,14 +50,21 @@ class CacheStore:
         self._warned: bool = False
 
     def get(self, h: str, focus: str = "") -> str | None:
-        """Return the cached description for this hash and focus, or None."""
+        """Return the cached description matching *focus* exactly.
+
+        When *focus* is given, only an exact match is returned — different
+        prompts need different vision calls.  When *focus* is empty, any
+        cached description is returned (backward-compatible default).
+        """
         entry = self._data.get(h)
         if entry is None:
             return None
         results = entry.get("focus_results", {})
         if not results:
             return None
-        return results.get(focus)
+        if focus:
+            return results.get(focus)  # strict: None if focus not found
+        return next(iter(results.values()))
 
     def set(self, h: str, description: str, focus: str = "通用描述",
             file_name: str = "", position: int = 0, label: str = "") -> None:

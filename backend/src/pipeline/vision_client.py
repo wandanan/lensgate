@@ -61,45 +61,88 @@ _MAX_RETRIES = 5
 # 100s+; 1500 is ample for an observation report and truncates drift early.
 _MAX_OUTPUT_TOKENS = 1500
 
-# Specialised prompt for design→code replication.  The vision model is told
-# to act as a measurement tool that extracts exact CSS values from a UI
-# screenshot.  This avoids the precision loss of natural-language colour
-# descriptions ("warm yellow" → #f59e0b).
+# Rich design-spec prompt for replicate mode.  Produces natural-language
+# sections (colour, typography, ASCII layout, components) plus CSS variables,
+# giving the downstream target model both semantic understanding and
+# measurable design tokens.
 _REPLICATE_PROMPT: str = (
-    "你是设计测量工具。从截图中精确提取视觉规范,只输出CSS自定义属性。\n"
+    "你是视觉设计审计员。从截图中完整提取所有视觉设计信息,用于精确复刻该界面。\n"
     "\n"
-    "严格按以下格式输出,禁止任何解释、描述或额外文字:\n"
+    "按以下五部分输出:\n"
     "\n"
+    "## 1. 色彩系统\n"
+    "- 每个区域/组件的背景色(hex)、文字色(hex)、边框色(hex)\n"
+    "- 渐变: 方向、起止色hex、中间色\n"
+    "- 透明/半透明: rgba 值和叠加效果\n"
+    "\n"
+    "## 2. 排版字体\n"
+    "- 每个层级的字体族、字号、字重、行高、字间距\n"
+    "- 等宽字体区域及其字体\n"
+    "- 文字对齐和换行\n"
+    "\n"
+    "## 3. 布局结构\n"
+    "用ASCII框线图画出页面的区域划分和嵌套关系,标注各区域用途。\n"
+    "只表达相对位置和包含关系,不需要标注像素尺寸。\n"
+    "下面只是格式参考,请严格按截图中实际的布局来画:\n"
+    "  +------------------------------------------+\n"
+    "  |               TopBar                      |\n"
+    "  +----------+-------------------------------+\n"
+    "  | Sidebar  |        Main Content           |\n"
+    "  | (nav)    |                               |\n"
+    "  +----------+-------------------------------+\n"
+    "如果截图中没有侧边栏就不要画侧边栏;有三栏就画三栏。如实反映截图。\n"
+    "\n"
+    "## 4. 组件细节\n"
+    "- 每个组件: 圆角、边框(宽度/颜色/样式)、阴影(含offset/blur/spread/color)\n"
+    "- hover/active/disabled 交互态变化\n"
+    "- 图标(大小/颜色)、头像(形状/边框)\n"
+    "- 代码块: 背景色、语法高亮色(关键字/字符串/注释)\n"
+    "- 分割线: 方向、颜色、粗细\n"
+    "- 列表/树: 缩进量、展开箭头样式、选中高亮\n"
+    "\n"
+    "## 5. CSS 自定义属性\n"
+    "按需增补变量,下面只是最低要求:\n"
     "<style>\n"
     ":root {\n"
-    "  --bg-primary: <页面背景色hex>;\n"
-    "  --bg-secondary: <次要背景色hex,如卡片/区块>;\n"
-    "  --text-primary: <主文字色hex>;\n"
-    "  --text-secondary: <次要文字色hex>;\n"
-    "  --accent: <强调色/品牌色hex>;\n"
-    "  --accent-hover: <强调色hover态hex,比accent深10-15%>;\n"
-    "  --font-family: <字体栈,优先系统字体>;\n"
-    "  --font-size-title: <标题字号,含单位>;\n"
-    "  --font-size-body: <正文字号,含单位>;\n"
-    "  --radius-sm: <小圆角,含单位>;\n"
-    "  --radius-md: <中圆角,含单位>;\n"
-    "  --radius-lg: <大圆角,含单位>;\n"
+    "  --bg-primary: <hex>;\n"
+    "  --bg-secondary: <hex>;\n"
+    "  --bg-tertiary: <hex>;\n"
+    "  --text-primary: <hex>;\n"
+    "  --text-secondary: <hex>;\n"
+    "  --text-muted: <hex>;\n"
+    "  --accent: <hex>;\n"
+    "  --accent-hover: <hex>;\n"
+    "  --accent-soft: <hex>;\n"
+    "  --success: <hex>;\n"
+    "  --warning: <hex>;\n"
+    "  --danger: <hex>;\n"
+    "  --border: <hex>;\n"
+    "  --border-hover: <hex>;\n"
+    "  --font-sans: <字体>;\n"
+    "  --font-mono: <字体>;\n"
+    "  --font-size-xs: <含单位>;\n"
+    "  --font-size-sm: <含单位>;\n"
+    "  --font-size-base: <含单位>;\n"
+    "  --font-size-lg: <含单位>;\n"
+    "  --font-size-xl: <含单位>;\n"
+    "  --font-size-2xl: <含单位>;\n"
+    "  --radius-sm: <含单位>;\n"
+    "  --radius-md: <含单位>;\n"
+    "  --radius-lg: <含单位>;\n"
     "  --radius-full: 9999px;\n"
-    "  --shadow-card: <卡片阴影,如 0 4px 20px rgba(0,0,0,0.06)>;\n"
-    "  --container-max: <内容区最大宽度,含单位>;\n"
-    "  --nav-height: <导航栏高度或padding,含单位>;\n"
-    "  --section-gap: <区块间距,含单位>;\n"
-    "  --card-padding: <卡片内边距,含单位>;\n"
+    "  --shadow-sm: <阴影>;\n"
+    "  --shadow-md: <阴影>;\n"
+    "  --shadow-lg: <阴影>;\n"
+    "  --section-gap: <含单位>;\n"
+    "  --card-padding: <含单位>;\n"
     "}\n"
     "</style>\n"
     "\n"
     "规则:\n"
-    "- 颜色必须精确到hex值(如 #f8f7f4)。不确定时给出最佳估计,不要写颜色名称。\n"
-    "- 尺寸精确到像素。从图片比例推算,不求精确到1px但求比例正确。\n"
-    "- 如界面有多套配色(深色/浅色),只提取当前显示的那套。\n"
-    "- 最多输出上面列出的变量。不要追加额外的CSS规则、布局代码或注释。\n"
-    "- 禁止输出HTML标签(除<style>包裹外)。禁止输出完整HTML页面。禁止输出JavaScript。\n"
-    "- 禁止markdown代码块包裹。禁止解释。只输出<style>:root{...}</style>。"
+    "- 颜色必须hex或rgba,禁止颜色名称(warm yellow→#f59e0b)\n"
+    "- 渐变必须标注方向和每段色值\n"
+    "- 禁止输出HTML页面、JavaScript、markdown代码块\n"
+    "- 不确定给出最合理估计,禁止说\"我无法确定\""
 )
 
 # Images larger than this (bytes) are compressed before sending to vision API.
@@ -386,15 +429,11 @@ class OpenAICompatibleVisionClient:
         return await self._call_with_retry(url, payload, headers, "compare")
 
     async def recognize_replicate(self, image: ImageBlock) -> str:
-        """Extract precise CSS variables from a UI screenshot.
+        """Extract a rich design spec from a UI screenshot.
 
-        Uses a specialised prompt that instructs the vision model to output
-        ``:root { ... }`` CSS custom properties instead of natural-language
-        description.  This eliminates the precision loss of "warm yellow"
-        → #f59e0b guessing by the downstream target model.
-
-        Returns the CSS block as a string, or ``""`` on failure so the
-        pipeline can fall back to a text description.
+        Uses a comprehensive prompt covering colours, typography, ASCII layout,
+        component details, and CSS variables — giving the downstream model
+        both semantic understanding and measurable design tokens.
         """
         if image.image_data is None:
             logger.warning("Vision replicate: image_data is None")
@@ -420,7 +459,7 @@ class OpenAICompatibleVisionClient:
                     ],
                 }
             ],
-            "max_tokens": 1024,  # CSS variables are small, cap prevents drift
+            "max_tokens": 4096,
         }
         logger.debug("Vision replicate payload: url=%s bytes=%d", url, len(json.dumps(payload)))
         headers = {
