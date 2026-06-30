@@ -242,7 +242,7 @@ claude config set anthropic_base_url http://localhost:9856/api.deepseek.com/anth
 | | 日志 | `core/logging_config.py` | 结构化日志 (structlog JSON) |
 | **pipeline/** | 格式检测 | `pipeline/format_detector.py` | Anthropic / OpenAI 请求解析 |
 | | 图片提取 | `pipeline/image_extractor.py` | content blocks 图像提取 + 缓存 |
-| | 视觉识别 | `pipeline/vision_client.py` | Qwen / OpenAI-compatible 识图 + 压缩 |
+| | 视觉识别 | `pipeline/vision_client.py` | OpenAI-compatible 识图 + 压缩（默认千问参数） |
 | | 请求重写 | `pipeline/request_rewriter.py` | ImageBlock → TextBlock 替换 |
 | | 决策引擎 | `pipeline/decision_engine.py` | 注意力路由（单图/对比/复刻/跳过） |
 | | 缓存存储 | `pipeline/cache_store.py` | SHA-256 + focus 组合键缓存 |

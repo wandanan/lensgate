@@ -236,7 +236,7 @@ Vision service failures never block the user:
 | | Logging | `core/logging_config.py` | Structured logging (structlog JSON) |
 | **pipeline/** | Format Detection | `pipeline/format_detector.py` | Anthropic / OpenAI request parsing |
 | | Image Extraction | `pipeline/image_extractor.py` | Image extraction + cache |
-| | Vision Client | `pipeline/vision_client.py` | Qwen / OpenAI-compatible recognition + compression |
+| | Vision Client | `pipeline/vision_client.py` | OpenAI-compatible recognition + compression (Qwen defaults) |
 | | Request Rewriter | `pipeline/request_rewriter.py` | ImageBlock → TextBlock replacement |
 | | Decision Engine | `pipeline/decision_engine.py` | Attention routing (single/compare/replicate/skip) |
 | | Cache Store | `pipeline/cache_store.py` | SHA-256 + focus composite-key cache |

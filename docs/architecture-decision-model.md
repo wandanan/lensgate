@@ -416,7 +416,7 @@ POST /v1/chat/completions
 `recognize_compare()` — 所有图一次发送, 模型在图像间做关联:
 
 ```
-class QwenVisionClient:
+class OpenAICompatibleVisionClient:
     async def recognize_compare(
         self,
         images: list[ImageBlock],

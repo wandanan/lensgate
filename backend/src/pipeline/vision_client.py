@@ -177,17 +177,17 @@ def _compress_image(data: bytes, media_type: str) -> tuple[bytes, str]:
 
 
 # ---------------------------------------------------------------------------
-# QwenVisionClient
+# OpenAICompatibleVisionClient
 # ---------------------------------------------------------------------------
 
 
-class QwenVisionClient:
-    """Client for the Qwen 3.7 Plus vision model via Aliyun Bailian Coding Plan.
+class OpenAICompatibleVisionClient:
+    """Client for OpenAI Chat Completions-compatible vision models.
 
     Usage::
 
         config = ProxyConfig()
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         description = await client.recognize(image_block)  # single image
         descriptions = await client.recognize_batch(blocks)  # parallel batch
     """

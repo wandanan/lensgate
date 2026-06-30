@@ -38,7 +38,7 @@ from backend.src.core.models import ImageBlock, ProxyRequest, TargetModelConfig
 from backend.src.pipeline.request_rewriter import RequestRewriter
 from backend.src.pipeline.response_handler import ResponseHandler
 from backend.src.pipeline.target_client import TargetModelClient
-from backend.src.pipeline.vision_client import QwenVisionClient
+from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
 # ---------------------------------------------------------------------------
 # Config
@@ -48,7 +48,7 @@ config = ProxyConfig()
 setup_logging()
 logger = logging.getLogger(__name__)
 
-vision_client = QwenVisionClient(config)
+vision_client = OpenAICompatibleVisionClient(config)
 rewriter = RequestRewriter()
 response_handler = ResponseHandler()
 decision_engine = DecisionEngine(
