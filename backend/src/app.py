@@ -5,6 +5,8 @@ Path-based target routing + decision-engine attention layer.
 """
 
 import asyncio
+import copy
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -13,6 +15,7 @@ from typing import AsyncGenerator
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from backend.src.pipeline.cache_store import cache
 from backend.src.core.config import ProxyConfig
@@ -160,6 +163,10 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
 
     # --- Stage 1: Format detect ---
     fmt = detect_format(path, body)
+    logger.debug("Format: %s model=%s msgs=%d stream=%s",
+                 fmt, body.get("model", "?"),
+                 len(body.get("messages", [])),
+                 body.get("stream", False))
     proxy_request = (
         parse_anthropic_request(body) if fmt == "anthropic"
         else parse_openai_request(body)
@@ -167,6 +174,8 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
 
     # --- Stage 2: Image check ---
     new_images = await extract_images(proxy_request, latest_only=True)
+    logger.debug("Image check: new_images=%d has_any_images=%s",
+                 len(new_images), has_images(proxy_request))
 
     # PATH C — pure text (no images anywhere in this request)
     if not new_images and not has_images(proxy_request):
@@ -223,13 +232,27 @@ async def _execute_pipeline(body: dict, path: str, target_config: TargetModelCon
             return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
         logger.info("Decision: skip (no relevant images for current question)")
+        all_images = await extract_images(proxy_request, latest_only=False)
+        vision_results = _lookup_cached(all_images)
+        if len(vision_results) < len(all_images):
+            logger.warning(
+                "Skip path: %d/%d images not cached, processing all",
+                len(all_images) - len(vision_results), len(all_images),
+            )
+            fallback = _default_decision(len(all_images))
+            vision_results = await _vision_and_cache(all_images, fallback, proxy_request)
+        if vision_results:
+            proxy_request = rewriter.rewrite(proxy_request, vision_results)
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
     all_images = await extract_images(proxy_request, latest_only=False)
     target_images, seen_hashes = _filter_images_by_hash(all_images, decision.image_hashes)
 
     if not target_images:
-        logger.warning("Decision requested images not found in body")
+        logger.warning("Decision requested images not found in body, processing all")
+        fallback = _default_decision(len(all_images))
+        vision_results = await _vision_and_cache(all_images, fallback, proxy_request)
+        proxy_request = rewriter.rewrite(proxy_request, vision_results)
         return await _forward(proxy_request.original_body, target_config, proxy_request.stream)
 
     logger.info("[RE-VISION] %d images from history, mode=%s", len(target_images), decision.mode)
@@ -440,8 +463,14 @@ async def _forward_passthrough(request: Request, target_url: str, api_key: str):
 
 
 async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
-    # Safety net: warn if raw image data is being forwarded to target
-    _warn_if_body_has_images(body)
+    # Strip any raw images that slipped past the rewriter (last-resort safety net).
+    body = _strip_images_from_body(body)
+
+    logger.debug(
+        "Forward: model=%s stream=%s body_bytes=%d url=%s",
+        target_config.model_id, stream,
+        len(json.dumps(body)), target_config.api_base,
+    )
 
     client = _get_target_client()
     try:
@@ -454,9 +483,18 @@ async def _forward(body: dict, target_config: TargetModelConfig, stream: bool):
     except httpx.TimeoutException as e:
         raise TargetModelTimeoutError(str(e)) from e
     except httpx.HTTPStatusError as e:
+        logger.warning(
+            "Target HTTP %d: %.300s",
+            e.response.status_code,
+            e.response.text[:300],
+        )
         if e.response.status_code >= 500:
             raise TargetModelUnavailableError(str(e)) from e
-        raise
+        # 4xx: pass through the target's own error response
+        return JSONResponse(
+            status_code=e.response.status_code,
+            content=e.response.json() if e.response.text else {"error": "target_error"},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -553,40 +591,59 @@ def _make_label(desc: str) -> str:
     return desc.strip()[:40]
 
 
-def _warn_if_body_has_images(body: dict) -> None:
-    """Log a warning if the request body still contains raw image data.
+def _lookup_cached(images: list[ImageBlock]) -> list[tuple[ImageBlock, str]]:
+    """Build vision_results from cache for images that have cached descriptions."""
+    results: list[tuple[ImageBlock, str]] = []
+    for img in images:
+        h = image_hash(img)
+        if h:
+            desc = cache.get(h)
+            if desc:
+                results.append((img, desc))
+    return results
 
-    Recursively scans message content blocks (including tool_result) for
-    Anthropic ``type: image`` or OpenAI ``type: image_url`` blocks that
-    should have been replaced by Rewrite before reaching _forward.
+
+def _strip_images_from_body(body: dict) -> dict:
+    """Remove all image blocks from the request body (last-resort safety net).
+
+    Image blocks MUST be replaced by the rewriter before reaching _forward.
+    This function catches any that slipped through — raw images must never
+    reach the target model.
     """
+    stripped = 0
 
     def _scan(blocks):
+        nonlocal stripped
         if not isinstance(blocks, list):
             return
-        for block in blocks:
+        for i, block in enumerate(blocks):
             if not isinstance(block, dict):
                 continue
             bt = block.get("type", "")
-            if bt == "image":
+            if bt in ("image", "image_url"):
                 src = block.get("source", {})
-                logger.warning(
-                    "SAFEGUARD: forwarding body with RAW image "
-                    "(source=%s, media=%s, data_len=%d)",
+                logger.error(
+                    "SAFEGUARD: stripping raw image before forward "
+                    "(source=%s, media=%s, data_len=%d) — this is a bug, "
+                    "rewriter should have replaced it",
                     src.get("type"), src.get("media_type", "?"),
                     len(src.get("data", "")),
                 )
-            elif bt == "image_url":
-                url = block.get("image_url", {}).get("url", "")
-                logger.warning(
-                    "SAFEGUARD: forwarding body with RAW image_url (url_len=%d)",
-                    len(url),
-                )
+                blocks[i] = {"type": "text", "text": "[图片]"}
+                stripped += 1
             elif bt == "tool_result":
                 _scan(block.get("content"))
 
+    body = copy.deepcopy(body)
     for msg in body.get("messages", []):
         _scan(msg.get("content"))
+
+    if stripped:
+        logger.error(
+            "SAFEGUARD: stripped %d raw image block(s) — pipeline bug, "
+            "images should be handled before _forward", stripped,
+        )
+    return body
 
 
 _SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)

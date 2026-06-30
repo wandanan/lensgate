@@ -253,6 +253,7 @@ class OpenAICompatibleVisionClient:
             ],
             "max_tokens": _MAX_OUTPUT_TOKENS,
         }
+        logger.debug("Vision payload: url=%s bytes=%d", url, len(json.dumps(payload)))
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -281,7 +282,12 @@ class OpenAICompatibleVisionClient:
 
                 if resp.status_code == 200:
                     data = resp.json()
-                    return data["choices"][0]["message"]["content"]
+                    content = data["choices"][0]["message"]["content"]
+                    logger.debug("Vision [%s] OK: tokens=%s\n%s",
+                                 label,
+                                 data.get("usage", {}).get("total_tokens", "?"),
+                                 content)
+                    return content
 
                 if not _is_retryable(resp.status_code):
                     if resp.status_code in (401, 403):
@@ -416,6 +422,7 @@ class OpenAICompatibleVisionClient:
             ],
             "max_tokens": 1024,  # CSS variables are small, cap prevents drift
         }
+        logger.debug("Vision replicate payload: url=%s bytes=%d", url, len(json.dumps(payload)))
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",

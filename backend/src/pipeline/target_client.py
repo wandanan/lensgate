@@ -12,11 +12,14 @@ convert into appropriate client-facing error codes (503/504).
 
 from __future__ import annotations
 
+import logging
 from typing import AsyncGenerator
 
 import httpx
 
 from backend.src.core.models import TargetModelConfig
+
+logger = logging.getLogger(__name__)
 
 
 class TargetModelClient:
@@ -85,12 +88,21 @@ class TargetModelClient:
         headers = self._build_headers(config)
         client = self._get_client()
 
+        logger.debug("Target forward: url=%s model=%s body_bytes=%d",
+                     url, config.model_id, len(str(request_body)))
         response = await client.post(
             url,
             json=request_body,
             headers=headers,
             timeout=httpx.Timeout(60.0),
         )
+        if response.status_code >= 400:
+            logger.warning(
+                "Target non-stream error: status=%d body=%.300s",
+                response.status_code, response.text[:300],
+            )
+        else:
+            logger.debug("Target response: status=%d", response.status_code)
         return response
 
     async def forward_raw(
@@ -141,11 +153,15 @@ class TargetModelClient:
         if api_key:
             fwd_headers["x-api-key"] = api_key
 
+        logger.debug("Target passthrough: %s %s body_bytes=%d",
+                     method, url, len(body))
         client = self._get_client()
-        return await client.request(
+        response = await client.request(
             method, url, headers=fwd_headers, content=body,
             timeout=httpx.Timeout(60.0),
         )
+        logger.debug("Target passthrough response: status=%d", response.status_code)
+        return response
 
     async def forward_stream(
         self, request_body: dict, config: TargetModelConfig
@@ -174,6 +190,15 @@ class TargetModelClient:
                 headers=headers,
                 timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=10.0),
             ) as response:
+                if response.status_code >= 400:
+                    logger.warning(
+                        "Target stream error: status=%d body=%.300s",
+                        response.status_code,
+                        (await response.aread()).decode("utf-8", errors="replace"),
+                    )
+                    yield f'data: {{"type":"error","error":"target_returned_{response.status_code}"}}\n\n'
+                    return
+                logger.debug("Target stream: status=%d", response.status_code)
                 async for line in response.aiter_lines():
                     yield line + "\n"
         except httpx.TimeoutException:

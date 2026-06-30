@@ -34,6 +34,9 @@ _HASH_RE = re.compile(r"^[a-f0-9]{64}$")
 _MAX_FOCUS_LEN = 200
 _MIN_FOCUS_LEN = 4
 
+# Prompt size guard: DeepSeek returns 400 when input is too large.
+_MAX_USER_MSG_LEN = 4000
+
 
 # ---------------------------------------------------------------------------
 # Decision result
@@ -173,6 +176,12 @@ class DecisionEngine:
                 raw_output = await self._call_model(full_prompt)
                 result = self._parse(raw_output)
 
+                logger.debug("Decision raw output: %s", raw_output)
+                logger.debug(
+                    "Decision parsed: mode=%s images=%d focus=%s reasoning=%s",
+                    result.mode, len(result.image_hashes),
+                    result.focus_prompt, result.reasoning,
+                )
                 logger.info(
                     "Decision OK (attempt %d): mode=%s images=%d",
                     attempt + 1, result.mode, len(result.image_hashes),
@@ -202,6 +211,16 @@ class DecisionEngine:
 
             except ServiceAuthError:
                 raise  # 密钥无效，不重试，直接报错
+
+            except _DecisionAPIError as exc:
+                logger.error(
+                    "Decision API error (attempt %d/%d): %s",
+                    attempt + 1, max_retries + 1, exc,
+                )
+                last_error = str(exc)
+                # 400 是请求格式问题，重试无意义
+                if exc.status == 400:
+                    break
 
             except _DecisionValidationError as exc:
                 last_error = str(exc)
@@ -248,6 +267,10 @@ class DecisionEngine:
 
         lines.append("用户消息 (最新在最后):")
         for i, msg in enumerate(user_messages, 1):
+            if len(msg) > _MAX_USER_MSG_LEN:
+                head = msg[:_MAX_USER_MSG_LEN * 2 // 3]
+                tail = msg[-_MAX_USER_MSG_LEN // 3:]
+                msg = f"{head}\n...[truncated, total {len(msg)} chars]...\n{tail}"
             lines.append(f"  {i}. {msg}")
 
         if cached_images:
@@ -271,7 +294,9 @@ class DecisionEngine:
             lines.append("\n已缓存图片: (无)")
 
         lines.append("\n请调用 route_decision 函数。")
-        return "\n".join(lines)
+        prompt = "\n".join(lines)
+        logger.debug("Decision prompt built: %d chars", len(prompt))
+        return prompt
 
     # ------------------------------------------------------------------
     # Internal: tool-calling API call
@@ -292,6 +317,8 @@ class DecisionEngine:
             "max_tokens": 400,
             "temperature": 0.1,
             "stream": False,
+            # deepseek-v4 系列默认开启 thinking mode，与 tool_choice 不兼容
+            "thinking": {"type": "disabled"},
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -300,14 +327,26 @@ class DecisionEngine:
         url = f"{self._base_url}/chat/completions"
         client = self._get_client()
 
+        logger.debug(
+            "Decision API call: model=%s url=%s payload_bytes=%d",
+            self._model, url, len(json.dumps(payload)),
+        )
+
         resp = await client.post(url, json=payload, headers=headers)
-        if resp.status_code in (401, 403):
+        if resp.status_code == 401:
             raise ServiceAuthError(
-                f"决策模型 API 密钥无效或已过期 (HTTP {resp.status_code})。"
-                f"请检查 .env 中的 DECISION_API_KEY。"
+                "决策模型 API 密钥无效或已过期 (HTTP 401)。"
+                "请检查 .env 中的 DECISION_API_KEY。"
             )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            body = resp.text
+            logger.error("DeepSeek API error %s: %s", resp.status_code, body[:500])
+            raise _DecisionAPIError(resp.status_code, body)
         data = resp.json()
+        logger.debug(
+            "Decision API response: model=%s tokens=%s",
+            data.get("model"), data.get("usage", {}).get("total_tokens", "?"),
+        )
 
         tool_calls = data["choices"][0]["message"].get("tool_calls", [])
         if not tool_calls:
@@ -397,6 +436,15 @@ def _validate_focus(fp: str) -> None:
 class _DecisionValidationError(ValueError):
     """Raised when the model output fails schema validation."""
     pass
+
+
+class _DecisionAPIError(Exception):
+    """Raised when the model API returns a non-2xx status."""
+
+    def __init__(self, status: int, body: str) -> None:
+        self.status = status
+        self.body = body
+        super().__init__(f"API error {status}: {body[:200]}")
 
 
 # ---------------------------------------------------------------------------
