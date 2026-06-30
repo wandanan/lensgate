@@ -53,7 +53,7 @@ from backend.src.core.error_handler import (  # noqa: E402
 )
 from backend.src.core.models import ImageBlock, ProxyRequest  # noqa: E402
 from backend.src.pipeline.response_handler import ResponseHandler  # noqa: E402
-from backend.src.pipeline.vision_client import FALLBACK_TEXT, QwenVisionClient  # noqa: E402
+from backend.src.pipeline.vision_client import FALLBACK_TEXT, OpenAICompatibleVisionClient  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ async def test_qwen_429_retry():
     # Create a vision client with a real config-like setup.
     # We monkey-patch the inner httpx.AsyncClient to avoid real HTTP calls.
     cfg = ProxyConfig()
-    vision_client = QwenVisionClient(cfg)
+    vision_client = OpenAICompatibleVisionClient(cfg)
 
     # Create a valid ImageBlock with minimal data
     img = ImageBlock(

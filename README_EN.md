@@ -14,7 +14,7 @@ Claude Code ──POST /api.deepseek.com/anthropic/v1/messages──▶ TLMA :98
   │  ① Format Detection (Anthropic/OpenAI)                     │
   │  ② Image Extraction + Cache Lookup                         │
   │  ③ Decision Engine (DeepSeek Chat) — route, focus, mode   │
-  │  ④ Vision Model (Kimi-K2.5) — image → text / CSS vars     │
+  │  ④ Vision Model (Qwen 3.7 Plus) — image → text / CSS vars │
   │  ⑤ Request Rewrite (image block → text block)              │
   │  ⑥ Target Forwarding (Coding Plan / API)                   │
   │  ⑦ Response (SSE streaming / JSON)                         │
@@ -114,7 +114,7 @@ All settings via `.env` file or environment variables.
 | **Vision Service** | | | |
 | `VISION_API_KEY` | Yes | — | API key for the vision service |
 | `VISION_BASE_URL` | No | `https://coding.dashscope.aliyuncs.com` | Vision API endpoint |
-| `VISION_MODEL` | No | `qwen3.7-plus` | Vision model (`kimi-k2.5` recommended) |
+| `VISION_MODEL` | No | `qwen3.7-plus` | Qwen vision model; replace with another compatible model if needed |
 | `VISION_TIMEOUT` | No | `180` | Vision timeout in seconds |
 | **Decision Engine** | | | |
 | `DECISION_API_KEY` | Yes | — | DeepSeek API key |
@@ -139,11 +139,13 @@ Only these two are required. Everything else has sensible defaults.
 
 | Model | Notes |
 |------|------|
-| `kimi-k2.5` | **Recommended**. ~8s single image, ~12s dual-image compare (at 1024px) |
-| `qwen3.7-plus` | Native vision model with thinking. ~27s single image, best for complex analysis |
+| `qwen3.7-plus` | **Default**. Native Qwen vision model, suitable for complex screenshot analysis |
+| `kimi-k2.5` | Optional. ~8s single image, ~12s dual-image compare (at 1024px) |
 | `qwen3.6-plus` | Previous generation, faster but slightly lower quality |
 
-The vision service uses the OpenAI Chat Completions protocol (`/v1/chat/completions`). Any compatible vision provider works — just change `VISION_BASE_URL`, `VISION_MODEL`, and `VISION_API_KEY`.
+The vision service uses the OpenAI Chat Completions protocol (`/v1/chat/completions`). Set `VISION_MODEL` to a provider-supported model ID. Any compatible vision provider works — just change `VISION_BASE_URL`, `VISION_MODEL`, and `VISION_API_KEY`.
+
+TLMA does not replace the downstream text model. It adds a derived image-analysis layer for strong text models such as DeepSeek, GLM, or Coding Plan targets: a vision model first converts images into focused descriptions or VI-Spec CSS variables, then the target text model performs the final reasoning and generation.
 
 ## Usage
 
@@ -234,7 +236,7 @@ Vision service failures never block the user:
 | | Logging | `core/logging_config.py` | Structured logging (structlog JSON) |
 | **pipeline/** | Format Detection | `pipeline/format_detector.py` | Anthropic / OpenAI request parsing |
 | | Image Extraction | `pipeline/image_extractor.py` | Image extraction + cache |
-| | Vision Client | `pipeline/vision_client.py` | Kimi-K2.5 / Qwen recognition + compression |
+| | Vision Client | `pipeline/vision_client.py` | OpenAI-compatible recognition + compression (Qwen defaults) |
 | | Request Rewriter | `pipeline/request_rewriter.py` | ImageBlock → TextBlock replacement |
 | | Decision Engine | `pipeline/decision_engine.py` | Attention routing (single/compare/replicate/skip) |
 | | Cache Store | `pipeline/cache_store.py` | SHA-256 + focus composite-key cache |

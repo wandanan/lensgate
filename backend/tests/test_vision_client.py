@@ -101,9 +101,9 @@ async def test_recognize_sends_correct_request():
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = _setup_httpx_mock(mock_client_cls, [mock_resp])
 
-        from backend.src.pipeline.vision_client import QwenVisionClient
+        from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         result = await client.recognize(image)
 
     # Verify return value.
@@ -147,8 +147,8 @@ async def test_recognize_sends_correct_request():
 async def test_prompt_has_task_constraint():
     """The vision prompt is prefixed with the role/limitation constraint.
 
-    Without it, kimi-k2.5 drifts into generating HTML/code instead of an
-    observation report, burning the token budget and stalling for 100s+.
+    Without it, vision models can drift into generating HTML/code instead of
+    an observation report, burning the token budget and stalling for 100s+.
     """
     config = _config()
     image = _image_block()
@@ -158,9 +158,9 @@ async def test_prompt_has_task_constraint():
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = _setup_httpx_mock(mock_client_cls, [mock_resp])
 
-        from backend.src.pipeline.vision_client import QwenVisionClient, _TASK_CONSTRAINT
+        from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient, _TASK_CONSTRAINT
 
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         await client.recognize(image, focus_prompt="检查代码高亮")
 
     text_block = mock_client.post.call_args[1]["json"]["messages"][0]["content"][1]["text"]
@@ -183,9 +183,9 @@ async def test_recognize_returns_non_empty_string():
     with patch("httpx.AsyncClient") as mock_client_cls:
         _setup_httpx_mock(mock_client_cls, [mock_resp])
 
-        from backend.src.pipeline.vision_client import QwenVisionClient
+        from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         result = await client.recognize(image)
 
     assert isinstance(result, str)
@@ -207,9 +207,9 @@ async def test_image_data_base64_encoded_correctly():
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = _setup_httpx_mock(mock_client_cls, [mock_resp])
 
-        from backend.src.pipeline.vision_client import QwenVisionClient
+        from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         await client.recognize(image)
 
     payload = mock_client.post.call_args[1]["json"]
@@ -229,10 +229,10 @@ async def test_recognize_batch_parallel():
         await asyncio.sleep(0.1)
         return _make_mock_response(200, "ok")
 
-    from backend.src.pipeline.vision_client import QwenVisionClient
+    from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
     config = _config()
-    client = QwenVisionClient(config)
+    client = OpenAICompatibleVisionClient(config)
 
     images = [_image_block(b"a"), _image_block(b"b"), _image_block(b"c")]
 
@@ -266,10 +266,10 @@ async def test_recognize_batch_parallel():
 @pytest.mark.asyncio
 async def test_recognize_batch_single_failure_does_not_block():
     """When one image fails (500), the other two succeed normally."""
-    from backend.src.pipeline.vision_client import QwenVisionClient
+    from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
     config = _config()
-    client = QwenVisionClient(config)
+    client = OpenAICompatibleVisionClient(config)
 
     images = [_image_block(b"a"), _image_block(b"b"), _image_block(b"c")]
 
@@ -301,9 +301,9 @@ async def test_recognize_timeout_returns_fallback():
     config = _config(vision_timeout=1)  # 1 s timeout
     image = _image_block()
 
-    from backend.src.pipeline.vision_client import QwenVisionClient
+    from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-    client = QwenVisionClient(config)
+    client = OpenAICompatibleVisionClient(config)
 
     # Make the mock raise httpx.TimeoutException.
     with patch("httpx.AsyncClient") as mock_client_cls:
@@ -333,9 +333,9 @@ async def test_sys_recognizing_api_success():
     with patch("httpx.AsyncClient") as mock_client_cls:
         _setup_httpx_mock(mock_client_cls, [mock_resp])
 
-        from backend.src.pipeline.vision_client import QwenVisionClient
+        from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         result = await client.recognize(image)
 
     assert isinstance(result, str)
@@ -360,9 +360,9 @@ async def test_sys_recognizing_api_failure_degradation():
         with patch("httpx.AsyncClient") as mock_client_cls:
             _setup_httpx_mock(mock_client_cls, [mock_resp])
 
-            from backend.src.pipeline.vision_client import QwenVisionClient
+            from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-            client = QwenVisionClient(config)
+            client = OpenAICompatibleVisionClient(config)
             result = await client.recognize(image)
 
         assert result == "[图片无法识别]", f"status {status} should degrade"
@@ -382,9 +382,9 @@ async def test_sys_auth_error_raises_service_auth_error():
         with patch("httpx.AsyncClient") as mock_client_cls:
             _setup_httpx_mock(mock_client_cls, [mock_resp])
 
-            from backend.src.pipeline.vision_client import QwenVisionClient
+            from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-            client = QwenVisionClient(config)
+            client = OpenAICompatibleVisionClient(config)
             with pytest.raises(ServiceAuthError):
                 await client.recognize(image)
 
@@ -402,9 +402,9 @@ async def test_sys_429_retry_success():
     resp_429 = _make_mock_response(429, "")
     resp_200 = _make_mock_response(200, "retry succeeded")
 
-    from backend.src.pipeline.vision_client import QwenVisionClient
+    from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-    client = QwenVisionClient(config)
+    client = OpenAICompatibleVisionClient(config)
 
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = mock_client_cls.return_value
@@ -435,9 +435,9 @@ async def test_sys_429_retry_still_fails():
 
     resp_429 = _make_mock_response(429, "")
 
-    from backend.src.pipeline.vision_client import QwenVisionClient
+    from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-    client = QwenVisionClient(config)
+    client = OpenAICompatibleVisionClient(config)
 
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = mock_client_cls.return_value
@@ -463,9 +463,9 @@ async def test_recognize_with_none_image_data_returns_fallback():
     config = _config()
     image = ImageBlock(image_data=None, media_type="image/png")
 
-    from backend.src.pipeline.vision_client import QwenVisionClient
+    from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-    client = QwenVisionClient(config)
+    client = OpenAICompatibleVisionClient(config)
 
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = mock_client_cls.return_value
@@ -488,9 +488,9 @@ async def test_recognize_batch_empty_list():
     """recognize_batch with an empty list returns an empty list."""
     config = _config()
 
-    from backend.src.pipeline.vision_client import QwenVisionClient
+    from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-    client = QwenVisionClient(config)
+    client = OpenAICompatibleVisionClient(config)
     results = await client.recognize_batch([])
     assert results == []
 
@@ -517,9 +517,9 @@ async def test_recognize_json_decode_error_returns_fallback():
         bad_resp.json = Mock(side_effect=json.JSONDecodeError("bad", "d", 0))
         mock_client.post = AsyncMock(return_value=bad_resp)
 
-        from backend.src.pipeline.vision_client import QwenVisionClient
+        from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         result = await client.recognize(image)
 
     assert result == "[图片无法识别]"
@@ -541,9 +541,9 @@ async def test_recognize_request_error_returns_fallback():
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=httpx.RequestError("connection refused"))
 
-        from backend.src.pipeline.vision_client import QwenVisionClient
+        from backend.src.pipeline.vision_client import OpenAICompatibleVisionClient
 
-        client = QwenVisionClient(config)
+        client = OpenAICompatibleVisionClient(config)
         result = await client.recognize(image)
 
     assert result == "[图片无法识别]"
