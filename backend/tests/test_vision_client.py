@@ -147,8 +147,8 @@ async def test_recognize_sends_correct_request():
 async def test_prompt_has_task_constraint():
     """The vision prompt is prefixed with the role/limitation constraint.
 
-    Without it, kimi-k2.5 drifts into generating HTML/code instead of an
-    observation report, burning the token budget and stalling for 100s+.
+    Without it, vision models can drift into generating HTML/code instead of
+    an observation report, burning the token budget and stalling for 100s+.
     """
     config = _config()
     image = _image_block()

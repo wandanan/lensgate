@@ -16,7 +16,7 @@ Claude Code ──POST /api.deepseek.com/anthropic/v1/messages──▶ TLMA :98
   │  ① 格式检测 (Anthropic/OpenAI)                              │
   │  ② 图片提取 + 缓存查询                                     │
   │  ③ 决策引擎 (DeepSeek Chat) — 选图、定向、single/compare/replicate  │
-  │  ④ 视觉模型 (Kimi-K2.5) — 识图 → 文字描述                  │
+  │  ④ 视觉模型 (Qwen 3.7 Plus) — 识图 → 文字描述              │
   │  ⑤ 请求重写 (image block → text block)                     │
   │  ⑥ 目标转发 (火山方舟 Coding Plan)                         │
   │  ⑦ 响应返回 (SSE 流式 / JSON)                              │
@@ -123,7 +123,7 @@ set PYTHONPATH=. && python -m backend.src.main
 | **视觉服务** | | | |
 | `VISION_API_KEY` | 是 | — | 阿里云百炼 Coding Plan API Key（`sk-sp-xxxxx` 格式） |
 | `VISION_BASE_URL` | 否 | `https://coding.dashscope.aliyuncs.com` | 识图服务地址 |
-| `VISION_MODEL` | 否 | `qwen3.7-plus` | 识图模型（推荐 `kimi-k2.5`） |
+| `VISION_MODEL` | 否 | `qwen3.7-plus` | 千问视觉模型；可替换为其他兼容模型 |
 | `VISION_TIMEOUT` | 否 | `180` | 识图超时（秒）。双图 compare 任务需要较长时间 |
 | **决策引擎** | | | |
 | `DECISION_API_KEY` | 是 | — | DeepSeek API Key |
@@ -148,8 +148,8 @@ DECISION_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 | 模型 | 说明 |
 |------|------|
-| `kimi-k2.5` | **推荐**。单图约 8s，双图 compare 约 12s（1024 压缩后） |
-| `qwen3.7-plus` | 阿里云百炼原生视觉模型。thinking 模型，单图约 27s，适合复杂分析 |
+| `qwen3.7-plus` | **默认**。阿里云百炼原生千问视觉模型，适合复杂截图分析 |
+| `kimi-k2.5` | 可选。单图约 8s，双图 compare 约 12s（1024 压缩后） |
 | `qwen3.6-plus` | 上代旗舰，较快但识别质量稍弱 |
 
 视觉模型通过阿里云百炼 Coding Plan 调用（`coding.dashscope.aliyuncs.com`），API Key 须为 Coding Plan 专属格式（`sk-sp-` 前缀）。
@@ -239,7 +239,7 @@ claude config set anthropic_base_url http://localhost:9856/api.deepseek.com/anth
 | | 日志 | `core/logging_config.py` | 结构化日志 (structlog JSON) |
 | **pipeline/** | 格式检测 | `pipeline/format_detector.py` | Anthropic / OpenAI 请求解析 |
 | | 图片提取 | `pipeline/image_extractor.py` | content blocks 图像提取 + 缓存 |
-| | 视觉识别 | `pipeline/vision_client.py` | Kimi-K2.5 / Qwen 识图 + 压缩 |
+| | 视觉识别 | `pipeline/vision_client.py` | Qwen / OpenAI-compatible 识图 + 压缩 |
 | | 请求重写 | `pipeline/request_rewriter.py` | ImageBlock → TextBlock 替换 |
 | | 决策引擎 | `pipeline/decision_engine.py` | 注意力路由（单图/对比/复刻/跳过） |
 | | 缓存存储 | `pipeline/cache_store.py` | SHA-256 + focus 组合键缓存 |

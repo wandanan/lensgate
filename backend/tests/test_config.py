@@ -47,6 +47,8 @@ def test_proxy_config_defaults(monkeypatch):
     config = ProxyConfig()
     assert config.proxy_host == "0.0.0.0"
     assert config.proxy_port == 9856
+    assert config.vision_base_url == "https://coding.dashscope.aliyuncs.com"
+    assert config.vision_model == "qwen3.7-plus"
     assert config.vision_timeout == 180
 
 

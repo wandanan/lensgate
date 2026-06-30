@@ -11,6 +11,10 @@ are automatically mapped to UPPER_CASE environment variables.
 from pydantic_settings import BaseSettings
 
 
+QWEN_VISION_BASE_URL = "https://coding.dashscope.aliyuncs.com"
+QWEN_VISION_MODEL = "qwen3.7-plus"
+
+
 class ProxyConfig(BaseSettings):
     """Proxy gateway configuration loaded from .env and environment variables.
 
@@ -28,8 +32,8 @@ class ProxyConfig(BaseSettings):
 
     # --- Vision service ---
     vision_api_key: str = ""
-    vision_base_url: str = "https://coding.dashscope.aliyuncs.com"
-    vision_model: str = "qwen3.7-plus"
+    vision_base_url: str = QWEN_VISION_BASE_URL
+    vision_model: str = QWEN_VISION_MODEL
     vision_timeout: int = 180
 
     # --- Decision engine (lightweight intent recognition) ---
