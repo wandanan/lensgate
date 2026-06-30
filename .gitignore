@@ -7,3 +7,5 @@ dev/probe_requests_.jsonl
 .pytest_cache/
 .claude/
 life_cycle_process/
+logs/
+valuation/
