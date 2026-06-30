@@ -1,8 +1,9 @@
 """
-Vision Client — Qwen 3.7 Plus 识图服务封装.
+Vision Client — OpenAI-compatible vision service wrapper.
 
-Encapsulates the Aliyun Bailian Coding Plan Qwen 3.7 Plus API.
-Sends images to the vision model and returns text descriptions.
+Encapsulates an OpenAI Chat Completions-compatible vision API. The default
+configuration targets Aliyun Bailian Coding Plan with a Qwen vision model, but
+other compatible image-analysis models can be selected via VISION_MODEL.
 
 Part of the proxy pipeline (C02):
 - recognize()        — send a single image, return text description

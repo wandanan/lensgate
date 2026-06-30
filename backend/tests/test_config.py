@@ -52,6 +52,26 @@ def test_proxy_config_defaults(monkeypatch):
     assert config.vision_timeout == 180
 
 
+def test_proxy_config_resolves_simple_qwen_alias(monkeypatch):
+    """VISION_MODEL accepts built-in aliases for lighter Qwen vision models."""
+    monkeypatch.setenv("VISION_MODEL", "qwen-simple")
+
+    from backend.src.core.config import ProxyConfig
+
+    config = ProxyConfig()
+    assert config.vision_model == "qwen3.6-plus"
+
+
+def test_proxy_config_keeps_custom_vision_model(monkeypatch):
+    """Unknown model names pass through for OpenAI-compatible providers."""
+    monkeypatch.setenv("VISION_MODEL", "provider/custom-vision-model")
+
+    from backend.src.core.config import ProxyConfig
+
+    config = ProxyConfig()
+    assert config.vision_model == "provider/custom-vision-model"
+
+
 # ---------------------------------------------------------------------------
 # TC-A02-LOG-005: TargetModelConfig populated from environment variables
 # ---------------------------------------------------------------------------
@@ -98,7 +118,7 @@ def test_validate_required_raises_on_missing_keys(monkeypatch):
 def test_validate_required_passes_when_keys_set(monkeypatch):
     """validate_required() does not raise when required keys are present."""
     monkeypatch.setenv("VISION_API_KEY", "sk-test-123")
-    monkeypatch.setenv("TARGET_DEFAULT_API_KEY", "sk-test-456")
+    monkeypatch.setenv("DECISION_API_KEY", "sk-test-456")
 
     from backend.src.core.config import ProxyConfig
 
