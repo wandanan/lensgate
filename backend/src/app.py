@@ -300,20 +300,40 @@ async def _vision_compare_locked(
     logger.info("[COMPARE] %d images in ONE vision call", len(images))
 
     hashes = [image_hash(img) for img in images]
+    image_hash_pairs = list(zip(images, hashes))
+    cache_focus = _compare_cache_focus(focus, hashes)
+    cache_hits = {
+        h: cache.get(h, cache_focus)
+        for h in hashes
+        if h
+    }
+    if hashes and all(h and cache_hits.get(h) for h in hashes):
+        logger.info("[COMPARE CACHE HIT] %d image(s)", len(images))
+        return [(img, cache_hits[h]) for img, h in image_hash_pairs if h]
+
     locks: list[tuple[str, asyncio.Lock]] = []
-    for h in sorted(h for h in hashes if h):
+    for h in sorted({h for h in hashes if h}):
         lock = cache.acquire_lock(h)
         await lock.acquire()
         locks.append((h, lock))
 
     try:
+        cache_hits = {
+            h: cache.get(h, cache_focus)
+            for h in hashes
+            if h
+        }
+        if hashes and all(h and cache_hits.get(h) for h in hashes):
+            logger.info("[COMPARE CACHE HIT] %d image(s) after lock", len(images))
+            return [(img, cache_hits[h]) for img, h in image_hash_pairs if h]
+
         desc = await vision_client.recognize_compare(images, focus)
         logger.debug("[VISION OUTPUT] %s", desc[:500])
         for img in images:
             h = image_hash(img)
             if h:
                 fname, pos = extract_file_metadata(proxy_request, img)
-                cache.set(h, desc, focus, fname, pos, _make_label(desc))
+                cache.set(h, desc, cache_focus, fname, pos, _make_label(desc))
         return [(img, desc) for img in images]
     finally:
         for h, lock in locks:
@@ -515,6 +535,16 @@ def _default_decision(image_count: int = 0) -> DecisionResult:
         mode=mode,
         reasoning="no cache — processing all images",
     )
+
+
+def _compare_cache_focus(focus: str, hashes: list[str | None]) -> str:
+    """Build a cache key for a specific compare call.
+
+    Compare output describes the relationship among a set of images, so it must
+    not be reused as a single-image description with the same focus prompt.
+    """
+    joined_hashes = ",".join(h for h in hashes if h)
+    return f"compare:{focus}:{joined_hashes}"
 
 
 def _make_label(desc: str) -> str:

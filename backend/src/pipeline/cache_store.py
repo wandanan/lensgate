@@ -50,14 +50,14 @@ class CacheStore:
         self._warned: bool = False
 
     def get(self, h: str, focus: str = "") -> str | None:
-        """Return any cached description for this hash, or None."""
+        """Return the cached description for this hash and focus, or None."""
         entry = self._data.get(h)
         if entry is None:
             return None
         results = entry.get("focus_results", {})
         if not results:
             return None
-        return next(iter(results.values()))
+        return results.get(focus)
 
     def set(self, h: str, description: str, focus: str = "通用描述",
             file_name: str = "", position: int = 0, label: str = "") -> None:
