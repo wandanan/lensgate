@@ -110,7 +110,7 @@ def test_compile_check():
     Then: compile succeeds
     """
     result = subprocess.run(
-        [sys.executable, "-m", "py_compile", "backend/src/core/error_handler.py"],
+        [sys.executable, "-m", "py_compile", "src/core/error_handler.py"],
         capture_output=True,
         text=True,
     )

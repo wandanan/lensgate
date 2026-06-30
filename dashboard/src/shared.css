@@ -94,12 +94,19 @@ body {
 }
 
 .sidebar-brand {
+  display: block;
   font-weight: 700;
   font-size: 0.9375rem;
   letter-spacing: -0.02em;
   padding: 0 8px 20px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  text-decoration: none;
+  cursor: pointer;
+}
+.sidebar-brand:hover {
+  color: var(--color-accent);
 }
 
 .sidebar-nav {

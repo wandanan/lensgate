@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import ThemeToggle from './ThemeToggle'
 
 interface SidebarProps {
@@ -15,7 +15,7 @@ export default function Sidebar({ currentPath }: SidebarProps) {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">LensGate</div>
+      <Link to="/" className="sidebar-brand">LensGate</Link>
       <nav className="sidebar-nav">
         {links.map((link) => (
           <NavLink

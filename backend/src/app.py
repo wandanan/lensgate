@@ -16,6 +16,7 @@ from typing import AsyncGenerator
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.src.pipeline.cache_store import cache
 from backend.src.core.config import ProxyConfig
@@ -78,6 +79,10 @@ def _get_target_client() -> TargetModelClient:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    from backend.src.dashboard.trace import buffer
+    restored = buffer.restore()
+    if restored:
+        logger.info("Restored %d trace(s) from SQLite", restored)
     yield
     if _target_client is not None:
         await _target_client.close()
@@ -89,6 +94,16 @@ app = FastAPI(title="TLMA - Text LLM Multimodal Agent", lifespan=_lifespan)
 app.add_middleware(APIKeyMiddleware, api_key=config.proxy_api_key)
 register_error_handlers(app)
 check_config(config)
+
+# Dashboard API (must register before catch-all)
+from backend.src.dashboard.api import router as dashboard_router
+app.include_router(dashboard_router)
+
+# Dashboard frontend static files
+from pathlib import Path as _Path
+_dist = _Path(__file__).parent.parent.parent / "dashboard" / "dist"
+if _dist.exists():
+    app.mount("/dashboard", StaticFiles(directory=str(_dist), html=True), name="dashboard")
 
 
 @app.get("/health")
