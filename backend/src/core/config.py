@@ -13,20 +13,6 @@ from pydantic_settings import BaseSettings
 
 QWEN_VISION_BASE_URL = "https://coding.dashscope.aliyuncs.com"
 QWEN_VISION_MODEL = "qwen3.7-plus"
-QWEN_SIMPLE_VISION_MODEL = "qwen3.6-plus"
-
-VISION_MODEL_ALIASES = {
-    "qwen-default": QWEN_VISION_MODEL,
-    "qwen-strong": QWEN_VISION_MODEL,
-    "qwen-simple": QWEN_SIMPLE_VISION_MODEL,
-    "qwen-light": QWEN_SIMPLE_VISION_MODEL,
-}
-
-
-def resolve_vision_model(model: str) -> str:
-    """Resolve built-in vision model aliases to provider model IDs."""
-    key = model.strip()
-    return VISION_MODEL_ALIASES.get(key, key)
 
 
 class ProxyConfig(BaseSettings):
@@ -60,10 +46,6 @@ class ProxyConfig(BaseSettings):
         "env_file": [".env", "backend/.env"],
         "env_file_encoding": "utf-8",
     }
-
-    def __init__(self, **values):
-        super().__init__(**values)
-        self.vision_model = resolve_vision_model(self.vision_model)
 
     def validate_required(self) -> None:
         """Validate that all required configuration fields are set.

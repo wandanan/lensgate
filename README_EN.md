@@ -114,7 +114,7 @@ All settings via `.env` file or environment variables.
 | **Vision Service** | | | |
 | `VISION_API_KEY` | Yes | — | API key for the vision service |
 | `VISION_BASE_URL` | No | `https://coding.dashscope.aliyuncs.com` | Vision API endpoint |
-| `VISION_MODEL` | No | `qwen3.7-plus` | Qwen vision model or alias; replace with another compatible model if needed |
+| `VISION_MODEL` | No | `qwen3.7-plus` | Qwen vision model; replace with another compatible model if needed |
 | `VISION_TIMEOUT` | No | `180` | Vision timeout in seconds |
 | **Decision Engine** | | | |
 | `DECISION_API_KEY` | Yes | — | DeepSeek API key |
@@ -140,12 +140,10 @@ Only these two are required. Everything else has sensible defaults.
 | Model | Notes |
 |------|------|
 | `qwen3.7-plus` | **Default**. Native Qwen vision model, suitable for complex screenshot analysis |
-| `qwen-default` / `qwen-strong` | Built-in aliases for `qwen3.7-plus` |
-| `qwen-simple` / `qwen-light` | Lightweight Qwen aliases resolved to `qwen3.6-plus` |
 | `kimi-k2.5` | Optional. ~8s single image, ~12s dual-image compare (at 1024px) |
 | `qwen3.6-plus` | Previous generation, faster but slightly lower quality |
 
-The vision service uses the OpenAI Chat Completions protocol (`/v1/chat/completions`). Any compatible vision provider works — just change `VISION_BASE_URL`, `VISION_MODEL`, and `VISION_API_KEY`.
+The vision service uses the OpenAI Chat Completions protocol (`/v1/chat/completions`). Set `VISION_MODEL` to a provider-supported model ID. Any compatible vision provider works — just change `VISION_BASE_URL`, `VISION_MODEL`, and `VISION_API_KEY`.
 
 TLMA does not replace the downstream text model. It adds a derived image-analysis layer for strong text models such as DeepSeek, GLM, or Coding Plan targets: a vision model first converts images into focused descriptions or VI-Spec CSS variables, then the target text model performs the final reasoning and generation.
 

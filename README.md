@@ -123,7 +123,7 @@ set PYTHONPATH=. && python -m backend.src.main
 | **视觉服务** | | | |
 | `VISION_API_KEY` | 是 | — | 阿里云百炼 Coding Plan API Key（`sk-sp-xxxxx` 格式） |
 | `VISION_BASE_URL` | 否 | `https://coding.dashscope.aliyuncs.com` | 识图服务地址 |
-| `VISION_MODEL` | 否 | `qwen3.7-plus` | 千问视觉模型或别名；可替换为其他兼容模型 |
+| `VISION_MODEL` | 否 | `qwen3.7-plus` | 千问视觉模型；可替换为其他兼容模型 |
 | `VISION_TIMEOUT` | 否 | `180` | 识图超时（秒）。双图 compare 任务需要较长时间 |
 | **决策引擎** | | | |
 | `DECISION_API_KEY` | 是 | — | DeepSeek API Key |
@@ -149,13 +149,11 @@ DECISION_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 | 模型 | 说明 |
 |------|------|
 | `qwen3.7-plus` | **默认**。阿里云百炼原生千问视觉模型，适合复杂截图分析 |
-| `qwen-default` / `qwen-strong` | `qwen3.7-plus` 的内置别名 |
-| `qwen-simple` / `qwen-light` | 轻量千问视觉别名，解析为 `qwen3.6-plus` |
 | `kimi-k2.5` | 可选。单图约 8s，双图 compare 约 12s（1024 压缩后） |
 | `qwen3.6-plus` | 上代旗舰，较快但识别质量稍弱 |
 
 视觉模型通过阿里云百炼 Coding Plan 调用（`coding.dashscope.aliyuncs.com`），API Key 须为 Coding Plan 专属格式（`sk-sp-` 前缀）。
-也可以直接填任意兼容 OpenAI Chat Completions 图片输入格式的视觉模型名，并配套修改 `VISION_BASE_URL`。
+请在 `VISION_MODEL` 中填写服务商实际支持的模型名；也可以填任意兼容 OpenAI Chat Completions 图片输入格式的视觉模型名，并配套修改 `VISION_BASE_URL`。
 
 TLMA 的定位不是替换目标文本模型，而是为 DeepSeek、GLM、火山方舟 Coding Plan 等强文本模型派生一层图片分析能力：先用轻量视觉模型把图片转为聚焦描述或 VI-Spec，再把结果交给目标文本模型继续推理和生成。
 

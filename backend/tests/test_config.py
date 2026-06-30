@@ -52,9 +52,9 @@ def test_proxy_config_defaults(monkeypatch):
     assert config.vision_timeout == 180
 
 
-def test_proxy_config_resolves_simple_qwen_alias(monkeypatch):
-    """VISION_MODEL accepts built-in aliases for lighter Qwen vision models."""
-    monkeypatch.setenv("VISION_MODEL", "qwen-simple")
+def test_proxy_config_reads_vision_model_from_env(monkeypatch):
+    """VISION_MODEL is read as the provider model ID configured by the user."""
+    monkeypatch.setenv("VISION_MODEL", "qwen3.6-plus")
 
     from backend.src.core.config import ProxyConfig
 
